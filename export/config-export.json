@@ -60,7 +60,6 @@
       "path": "config/server.toml",
       "sha256": "a79bbb5380ddabad0af694831263da4f4d068a8702a746ea474ac5781d23fd36",
       "placeholders": [
-        "...",
         "fs/kanidm/domain",
         "fs/kanidm/tls-key#file"
       ]
