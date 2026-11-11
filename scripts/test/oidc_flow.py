@@ -100,6 +100,31 @@ def fresh_totp(factor):
         time.sleep(1)
 
 
+def re_title(raw):
+    """Short, token-free description of an HTML answer: its title only."""
+    import re
+    m = re.search(rb"<title>(.*?)</title>", raw, re.S | re.I)
+    return (m.group(1).decode("utf-8", "replace").strip() if m else f"{len(raw)} bytes")[:100]
+
+
+def plain_get(url, cookie=""):
+    """GET over plain http without cookie handling of our own; returns (status, header list, body bytes)."""
+    u = urllib.parse.urlparse(url)
+    import http.client
+    c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=30)
+    h = {"Accept": "application/json"}
+    if cookie:
+        h["Cookie"] = cookie
+    c.request("GET", u.path + ("?" + u.query if u.query else ""), headers=h)
+    r = c.getresponse()
+    return r.status, r.getheaders(), r.read()
+
+
+def cookies_from(headers):
+    """name=value pairs of all Set-Cookie headers (a browser sends cookies marked Secure to http://localhost as well)."""
+    return "; ".join(v.split(";", 1)[0] for k, v in headers if k.lower() == "set-cookie")
+
+
 def auth(user, password, privileged=False, factor=None):
     s, h, js, _ = call("POST", f"{IDM}/v1/auth", {"step": {"init2": {"username": user, "issue": "token", "privileged": privileged}}})
     sid = h.get("x-kanidm-auth-session-id")
@@ -232,10 +257,11 @@ def phase_tuwunel():
     result("Tuwunel offers m.login.sso", s == 200 and bool(sso), s)
     if not sso:
         return
-    jar = http.cookiejar.CookieJar()
     back = "http://localhost:3000/after"
-    s, h, _, _ = call("GET", f"{MATRIX}/_matrix/client/v3/login/sso/redirect/tuwunel?redirectUrl={urllib.parse.quote(back)}", jar=jar)
-    loc = h.get("location") or h.get("Location") or ""
+    s, hl, _ = plain_get(f"{MATRIX}/_matrix/client/v3/login/sso/redirect/tuwunel?redirectUrl={urllib.parse.quote(back)}")
+    h = {k.lower(): v for k, v in hl}
+    cookie = cookies_from(hl)
+    loc = h.get("location", "")
     pu = urllib.parse.urlparse(loc)
     # Only scheme, host and path are shown; the query (state, nonce, client_id, redirect_uri) is cut off.
     result("Tuwunel redirects to Kanidm authorise", s in (302, 303, 307) and "/oauth2" in pu.path, f"{s} {pu.scheme}://{pu.netloc}{pu.path}")
@@ -254,10 +280,24 @@ def phase_tuwunel():
     result("Kanidm sends the browser back to Tuwunel with a code", loc2.startswith(MATRIX) or "/sso/callback/" in loc2, s)
     if not loc2:
         return
-    s, h, _, _ = call("GET", loc2.replace("http://localhost:8008", MATRIX), jar=jar)
-    final = h.get("location") or h.get("Location") or ""
+    s, hl, raw = plain_get(loc2.replace("http://localhost:8008", MATRIX), cookie=cookie)
+    h = {k.lower(): v for k, v in hl}
+    try:
+        js = json.loads(raw)
+    except ValueError:
+        js = None
+    final = h.get("location", "")
     ltok = urllib.parse.parse_qs(urllib.parse.urlparse(final).query).get("loginToken", [None])[0]
-    result("Tuwunel callback accepts the code and issues a loginToken", bool(ltok), s)
+    if not ltok:
+        # Tuwunel may answer with an HTML page that sends the browser on (the token is then inside the page).
+        import re
+        m = re.search(rb"loginToken=([A-Za-z0-9._~%-]+)", raw)
+        ltok = urllib.parse.unquote(m.group(1).decode()) if m else None
+    # On failure show only Matrix's error code and message (no tokens: they are not part of such an error body).
+    why = ""
+    if not ltok:
+        why = f"{(js or {}).get('errcode')}: {(js or {}).get('error')}" if isinstance(js, dict) else re_title(raw)
+    result("Tuwunel callback accepts the code and issues a loginToken", bool(ltok), f"{s} {why}")
     if not ltok:
         return
     s, _, js, _ = call("POST", f"{MATRIX}/_matrix/client/v3/login", {"type": "m.login.token", "token": ltok})
