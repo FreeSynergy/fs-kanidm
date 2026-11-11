@@ -132,7 +132,7 @@ say "3/4 OIDC login through Zentinel"
 # The admin password goes from the recovery output through sed straight into a Podman secret; it is never printed or stored in a file.
 # (only the NUMBER of bytes is counted, to prove that something was captured)
 n=$(podman exec fs-test-kanidm /sbin/kanidmd recover-account idm_admin -c /cfg/server.toml 2>&1 | sed -n 's/.*new_password: "\(.*\)".*/\1/p' | tail -n 1 | tee >(secret_from fs-admin-pw) | wc -c)
-sleep 1
+for _ in $(seq 1 20); do podman secret exists fs-admin-pw && break; sleep 0.5; done   # the process substitution creates the secret asynchronously
 { [ "$n" -gt 8 ] && podman secret exists fs-admin-pw; } || { echo "FAIL could not recover idm_admin"; exit 1; }
 podman run -d --name fs-test-runner --pod "$pod" "${H[@]}" --pids-limit=64 --memory=256m --read-only --tmpfs /state:rw,mode=0700 --tmpfs /tmp \
   -e PYTHONDONTWRITEBYTECODE=1 -e IDM_URL="$IDM" --secret fs-ca,mode=0400 --secret fs-admin-pw,mode=0400 \
@@ -150,6 +150,7 @@ if [ "$rc" = 0 ]; then
   for _ in $(seq 1 60); do podman exec fs-test-runner python3 -I -c 'import urllib.request;urllib.request.urlopen("http://localhost:8008/_matrix/client/versions",timeout=3)' >/dev/null 2>&1 && break
     [ "$(podman inspect -f '{{.State.Running}}' fs-test-tuwunel)" = true ] || break; sleep 2; done
   run_flow tuwunel || rc=1
+  if podman logs fs-test-tuwunel 2>&1 | grep -q "Username invalid"; then echo "FAIL Tuwunel had to fall back to another claim for the user name (\"Username invalid\")"; rc=1; else echo "PASS the Matrix user name came from the chosen claim (no \"Username invalid\" fallback)"; fi
   [ "$rc" = 0 ] || quiet_logs fs-test-tuwunel
 fi
 [ "$rc" = 0 ] || { quiet_logs fs-test-zentinel; quiet_logs fs-test-kanidm; }
