@@ -1,6 +1,8 @@
 # Build Kanidm from the commit pinned in mirror.toml, mirror its source, sign everything with the FreeSynergy release key
 # (existing secrets GPG_PRIVATE_KEY / GPG_PASSPHRASE, used only by fs-release's sign-files action) and create a DRAFT release.
 # Never publishes. Runs only by hand (workflow_dispatch).
+# Two jobs: `build` runs foreign build code WITHOUT secrets and with read-only rights; `sign` has the secrets and the write rights but runs
+# no foreign code, only fs-release actions pinned by commit SHA and the checked-in verify script.
 name: mirror
 on:
   workflow_dispatch:
@@ -14,22 +16,17 @@ on:
         type: boolean
         default: false
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 jobs:
-  mirror:
+  build:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - if: ${{ !inputs.build_only }}
-        name: Signing key must be present (a mirror is never published unsigned)
-        env:
-          K: ${{ secrets.GPG_PRIVATE_KEY }}
-        run: test -n "$K" || { echo "::error::GPG_PRIVATE_KEY is not set in this repository"; exit 1; }
       - name: Read the pin from mirror.toml
         id: pin
         run: |
@@ -100,42 +97,74 @@ jobs:
           install -m644 "$t/libnss_kanidm.so" "$s/usr/lib/libnss_kanidm.so.2"
           cp -r src/server/core/static "$s/usr/share/kanidmd/static"
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@"$(git -C src log -1 --format=%ct)" -C "$s" -czf "dist/kanidm-$V-linux-x86_64.tar.gz" .
-      - uses: FreeSynergy/fs-release/actions/sbom@main
+      - uses: FreeSynergy/fs-release/actions/sbom@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           name: kanidm
           version: ${{ steps.pin.outputs.version }}
           working-directory: src
-      - if: ${{ !inputs.build_only }}
-        uses: FreeSynergy/fs-release/actions/sign-files@main
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kanidm-unsigned
+          path: dist
+          retention-days: 3
+  sign:
+    needs: build
+    if: ${{ !inputs.build_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Signing key must be present (a mirror is never published unsigned)
+        env:
+          K: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: test -n "$K" || { echo "::error::GPG_PRIVATE_KEY is not set in this repository"; exit 1; }
+      - name: Read the pin from mirror.toml
+        id: pin
+        run: |
+          python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
+          import tomllib
+          m = tomllib.load(open("mirror.toml", "rb"))
+          print("repository=" + m["source"]["repository"]); print("tag=" + m["source"]["tag"])
+          print("commit=" + m["source"]["commit"]); print("version=" + m["upstream"]["version"])
+          print("profile=" + m["build"]["profile"])
+          PY
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kanidm-unsigned
+          path: dist
+      - uses: FreeSynergy/fs-release/actions/sign-files@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           mode: packages
           private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
-      - uses: FreeSynergy/fs-release/actions/checksums@main
-      - if: ${{ !inputs.build_only }}
-        uses: FreeSynergy/fs-release/actions/sign-files@main
+      - uses: FreeSynergy/fs-release/actions/checksums@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+      - uses: FreeSynergy/fs-release/actions/sign-files@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           mode: detached
           private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
-      - if: ${{ !inputs.build_only }}
-        name: Verify our signatures against the project's public key (fingerprint from mirror.toml; nothing secret is printed)
+      - name: Verify our signatures against the project's public key (fingerprint from mirror.toml; nothing secret is printed)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api repos/FreeSynergy/fs-release/contents/release-signing-key.asc --jq .content | base64 -d > "$RUNNER_TEMP/release-signing-key.asc"
           scripts/verify-mirror.sh dist "$RUNNER_TEMP/release-signing-key.asc"
-      - if: ${{ !inputs.build_only }}
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: kanidm-mirror
+          name: kanidm-mirror-signed
           path: dist
-      - if: ${{ !inputs.build_only && inputs.draft_release }}
-        uses: FreeSynergy/fs-release/actions/draft-release@main
+      - if: ${{ inputs.draft_release }}
+        uses: FreeSynergy/fs-release/actions/draft-release@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           tag: v${{ steps.pin.outputs.version }}
           name: Kanidm
