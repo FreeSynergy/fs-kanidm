@@ -7,7 +7,6 @@
 # primary key is fine). RED on any other status line: EXPKEYSIG, EXPSIG, REVKEYSIG, BADSIG, ERRSIG, NO_PUBKEY, or
 # no GOODSIG/VALIDSIG at all; EVERY VALIDSIG line of a signature must carry the expected primary fingerprint. No .asc at all, a file without signature, or an empty directory is a failure. Nothing secret is read or printed.
 set -euo pipefail
-gpgbin=${FS_VERIFY_GPG:-gpg}   # only the selftest overrides this (canned status lines for each single status word)
 want=""
 if [ "${1:-}" = "--fingerprint" ]; then want=${2:?}; shift 2; fi
 dir=${1:?usage: verify-mirror.sh [--fingerprint F] <release-dir> <public-key.asc>}
@@ -33,7 +32,7 @@ while IFS= read -r -d '' f; do
   case $f in *.asc) continue ;; esac
   n=$((n+1)); name=$(basename "$f")
   if [ ! -f "$f.asc" ]; then echo "FAIL no signature for $name"; fail=1; continue; fi
-  status=$("$gpgbin" --batch --status-fd=1 --verify "$f.asc" "$f" 2>/dev/null || true)
+  status=$(gpg --batch --status-fd=1 --verify "$f.asc" "$f" 2>/dev/null || true)
   if printf '%s\n' "$status" | grep -q -E "^\[GNUPG:\] ($BAD)( |$)"; then
     echo "FAIL $name: $(printf '%s\n' "$status" | grep -o -E "^\[GNUPG:\] ($BAD)" | cut -d' ' -f2 | sort -u | paste -sd, -)"; fail=1; continue
   fi

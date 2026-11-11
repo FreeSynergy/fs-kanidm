@@ -5,7 +5,8 @@
 # revoked key, revoked signing subkey, expired signature, tampered file, no signatures, one unsigned file, file missing from SHA256SUMS.txt, empty directory,
 # wrong key file; ROTATION (green): an old expired or revoked signing subkey sits in the key file next to a good signature by the
 # new subkey. Expiry uses --faked-system-time (keys created and used in 2020 with a one-day life): no sleeping, no dependence on the
-# speed of the runner. Each single status word of the reject list is also tested ALONE with a canned gpg output (FS_VERIFY_GPG), so
+# speed of the runner. Each single status word of the reject list is also tested ALONE with a canned gpg output (a wrapper named gpg
+# placed first in PATH for these cases only; the script under test has no environment switch that replaces gpg), so
 # removing one word from verify-mirror.sh is noticed. Two VALIDSIG lines with different primaries are red.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -83,8 +84,10 @@ pub v@test.invalid > "$t/v.asc"
                                  expect "signature by a REVOKED signing SUBkey (revocation imported) = red" 1 "$t/rotold" "$t/v.asc" "$V" REVKEYSIG
                                  expect "ROTATED: old REVOKED subkey in the key file next to a good signature by the new subkey = green" 0 "$t/rotnewv" "$t/v.asc" "$V"
 # each status word ALONE: canned gpg output = good signature by the right primary key plus exactly one bad status line
-mkdir "$t/mock"; cat > "$t/mock/gpg" <<'MOCK'
+mkdir "$t/mock"; REALGPG=$(command -v gpg); export REALGPG
+cat > "$t/mock/gpg" <<'MOCK'
 #!/usr/bin/env bash
+case " $* " in *" --verify "*) ;; *) exec "$REALGPG" "$@" ;; esac   # only the signature check is canned; key import/listing stay real
 [ -n "${MOCK_NOGOOD:-}" ] || echo "[GNUPG:] GOODSIG 0123456789ABCDEF mock"
 echo "[GNUPG:] VALIDSIG $MOCK_FPR 2026-01-01 1 0 4 0 22 10 00 $MOCK_FPR"
 [ -n "${MOCK_EXTRA:-}" ] && echo "[GNUPG:] $MOCK_EXTRA"
@@ -94,7 +97,7 @@ MOCK
 chmod +x "$t/mock/gpg"; export MOCK_FPR="$A"
 mk "$t/mk" "$A"
 mockcase() {  # name want extra valid2
-  local rc; MOCK_EXTRA="$3" MOCK_VALID2="${4:-}" FS_VERIFY_GPG="$t/mock/gpg" "$v" --fingerprint "$A" "$t/mk" "$t/a.asc" >/dev/null 2>&1; rc=$?
+  local rc; MOCK_EXTRA="$3" MOCK_VALID2="${4:-}" PATH="$t/mock:$PATH" "$v" --fingerprint "$A" "$t/mk" "$t/a.asc" >/dev/null 2>&1; rc=$?
   if { [ "$2" = 0 ] && [ $rc = 0 ]; } || { [ "$2" = 1 ] && [ $rc != 0 ]; }; then echo "PASS $1"; else echo "FAIL $1 (rc $rc)"; fail=1; fi
 }
 mockcase "canned GOODSIG+VALIDSIG alone = green (control)" 0 ""
