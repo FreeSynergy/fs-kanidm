@@ -163,6 +163,7 @@ jobs:
         with:
           name: kanidm-mirror-signed
           path: dist
+          retention-days: 3
       - if: ${{ inputs.draft_release }}
         uses: FreeSynergy/fs-release/actions/draft-release@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
