@@ -16,7 +16,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PLACEHOLDER = re.compile(r"\$\{vault:([A-Za-z0-9_./#-]+)\}")
+PLACEHOLDER = re.compile(r"\$\{vault:([A-Za-z][A-Za-z0-9_./#-]*)\}")
 SUPPORT = {"yes", "no", "unstable"}
 RELATION = {"provides", "requires", "recommends"}
 SECRETISH = re.compile(r"(password|passwd|secret|token|private|api[_-]?key|credential)", re.I)
