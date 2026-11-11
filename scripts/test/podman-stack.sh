@@ -4,8 +4,12 @@
 #
 # Rules (project decisions):
 #  * SELinux stays Enforcing. Bind mounts are labelled :Z and hold only NON-secret rendered configs (/dev/shm/..., mode 0755).
-#  * Test secrets live ONLY in containers: in a container's own tmpfs (mode 0700) or as Podman secrets (created from stdin,
-#    removed at the end). Never in a host file, never in the host environment, never in a variable visible to `podman inspect`.
+#  * Test secrets are never written to host files of ours, never put into the host environment or into command-line arguments, and
+#    never visible in `podman inspect`. They live in containers (a container's own tmpfs, mode 0700) or in Podman secrets created
+#    from stdin. HONEST NOTE: Podman's default secret driver (`file`) keeps Podman secrets as base64 in the user's own store
+#    (~/.local/share/containers/storage/secrets/filedriver/secretsdata.json, mode 0600) until `podman secret rm`, which deletes the
+#    entry but does not overwrite the disk. Everything stored there is throw-away (the CA lives 1 day, the passwords belong to a
+#    test server that is removed at the end). We do not change host configuration to move that store to a tmpfs.
 #      - TLS keys/CA: generated inside container fs-test-pki (tmpfs), piped by `podman exec ... cat | podman secret create`.
 #      - Kanidm admin password: `kanidmd recover-account` output is piped through sed into `podman secret create` (never printed).
 #      - Test person's password + TOTP secret, OAuth2 client secret: created and kept inside the runner container (tmpfs /state).
@@ -16,8 +20,8 @@
 #  * First the secret scan (selftest + all three repos), at the end also over this run's output; at the end the SELinux check
 #    (journalctl, no root; unreadable journal = red).
 # The configs under test are the templates of the three repos, rendered with NON-secret test values (render.py prints each override).
-# Containers are the makers' official images, used ONLY for this local test (never mirrored). The Tuwunel image is pinned by digest and
-# its revision label must equal the commit pinned in fs-tuwunel/mirror.toml.
+# Containers are the makers' official images (python: Docker official image), ALL pinned by digest, used ONLY for this local test (never
+# mirrored). The Tuwunel image's revision label must equal the commit pinned in fs-tuwunel/mirror.toml.
 #
 # pids limits: zentinel 256 (one worker per core, 32 here, plus runtime threads), kanidm 512 (tokio + database threads), tuwunel 1024
 # (database pool capped by config at 256 workers plus tokio and RocksDB threads; upstream's default needs more than 2048),
@@ -27,11 +31,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 kanidm_repo=$(cd "$here/../.." && pwd)
 zentinel_repo=${FS_ZENTINEL_DIR:-$kanidm_repo/../fs-zentinel}
 tuwunel_repo=${FS_TUWUNEL_DIR:-$kanidm_repo/../fs-tuwunel}
-KANIDM_IMAGE=${KANIDM_IMAGE:-docker.io/kanidm/server:1.12.0}
-ZENTINEL_IMAGE=${ZENTINEL_IMAGE:-ghcr.io/zentinelproxy/zentinel:26.11_1}
+KANIDM_IMAGE=${KANIDM_IMAGE:-docker.io/kanidm/server@sha256:71b6ff5a9c9c32b632894d8acef5a2afc77941b35a0aa95dcee959fe688d5ce9}   # tag 1.12.0
+ZENTINEL_IMAGE=${ZENTINEL_IMAGE:-ghcr.io/zentinelproxy/zentinel@sha256:4718b2ea97276d11fd327bafce92bbd095fd2db86d013f6600c3b3663513d197}   # tag 26.11_1
 TUWUNEL_IMAGE=${TUWUNEL_IMAGE:-ghcr.io/matrix-construct/tuwunel@sha256:43e55dd2eb36c9b6604b68cbd2a7aeace1899143eeda87c6c8f5cbf508d8ab7e}
-RUNNER_IMAGE=${RUNNER_IMAGE:-docker.io/library/python:3.13-slim}
-PKI_IMAGE=${PKI_IMAGE:-docker.io/alpine/openssl:latest}
+RUNNER_IMAGE=${RUNNER_IMAGE:-docker.io/library/python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90}   # 3.13-slim
+PKI_IMAGE=${PKI_IMAGE:-docker.io/library/python@sha256:ecbe213fb818d557fd19db4078244339e2e2e52874f9c81052d3094ea114d797}   # python:3.13 (full image: contains the openssl CLI)
 pod=fs-test
 secrets=(fs-ca fs-kanidm-chain fs-kanidm-key fs-zentinel-chain fs-zentinel-key fs-admin-pw fs-oidc)
 . "$here/avc_check.sh"
@@ -85,7 +89,7 @@ if [ "$got" = "$want" ]; then echo "PASS Tuwunel image revision equals the pinne
 
 say "pod; TLS material is generated inside a container (tmpfs) and handed over as Podman secrets"
 podman pod create --name "$pod" --add-host "$D:127.0.0.1" --add-host matrix.test.local:127.0.0.1 >/dev/null
-podman run -d --name fs-test-pki --pod "$pod" "${H[@]}" --pids-limit=64 --memory=128m --tmpfs /tls:rw,mode=0700 --entrypoint sh "$PKI_IMAGE" -c '
+podman run -d --name fs-test-pki --pod "$pod" "${H[@]}" --pids-limit=64 --memory=128m --tmpfs /tls:rw,mode=0700 "$PKI_IMAGE" sh -c '
   set -e; cd /tls; umask 077
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj "/CN=fs-test-ca" -keyout ca.key -out ca.pem -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash" 2>/dev/null
   printf "subjectAltName=DNS:idm.test.local,DNS:matrix.test.local,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nauthorityKeyIdentifier=keyid\nsubjectKeyIdentifier=hash\n" > ext
@@ -154,7 +158,7 @@ for c in fs-test-zentinel fs-test-kanidm fs-test-runner fs-test-tuwunel; do
 done
 say "memory in use (limits: zentinel 256m, kanidm 1g, tuwunel 1g, runner 256m)"; podman stats --no-stream --format '{{.Name}} {{.MemUsage}}' 2>/dev/null | grep fs-test || true
 
-sleep 1
+for _ in $(seq 1 20); do grep -q "memory in use" "$work/run.log" && break; sleep 0.5; done   # wait until tee has written the log
 "$here/scan_secrets.sh" "$work/run.log" && echo "PASS no secret pattern in this run's output" || { echo "FAIL secret pattern in the run output"; rc=1; }
 say "SELinux check (setroubleshoot since $start, no root; journal readability proven by a marker line)"
 sleep 8

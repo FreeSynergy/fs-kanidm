@@ -3,7 +3,9 @@
 #   avc_prepare          writes a random marker line into the journal (logger -t fs-test-marker); sets AVC_MARKER
 #   avc_alarms <since>   ("YYYY-MM-DD HH:MM:SS") first proves the journal is readable by finding the marker again, then prints
 #                        setroubleshoot alarms since <since>. Return: 0 = none, 1 = alarm (RED), 2 = journal not readable (RED).
-# No root needed. A journal that cannot be read must never look like "no alarms": journalctl then prints a hint and exits 0,
+# No root needed. NOTE: the marker is written by the user and lands in the user's own journal (journald SplitMode=uid), so finding it
+# only proves that journalctl runs; whether the SYSTEM journal (where setroubleshoot writes) is readable is proven by the hint-text
+# check below ("not seeing messages ...", tested in test_avc_check.sh), not by the marker. A journal that cannot be read must never look like "no alarms": journalctl then prints a hint and exits 0,
 # so the marker round trip and the hint text are checked explicitly.
 # For the unit test (test_avc_check.sh) AVC_JOURNAL replaces the journalctl command.
 avc_journal() { "${AVC_JOURNAL:-journalctl}" "$@"; }
