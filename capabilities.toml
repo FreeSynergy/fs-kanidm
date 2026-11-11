@@ -1,0 +1,89 @@
+# Capability tags (ADR 0068). relation: provides | requires | recommends. support: yes | no | unstable.
+# Names follow the topic interfaces (fs-interfaces, thread T) and stay provisional until that list is final.
+# Every yes/unstable cites an upstream source for this exact version.
+
+[package]
+id = "fs-kanidm"
+upstream = "Kanidm"
+version = "1.12.0"
+checked = "2026-11-11"
+
+[[capability]]
+tag = "identity.oidc"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/supported_features.md"
+text_en = "OpenID Connect Core 1.0 and Discovery; ES256 id_token signatures, PKCE S256; RS256 only as an explicit exception per client."
+text_de = "OpenID Connect Core 1.0 und Discovery; ES256-id_token, PKCE S256; RS256 nur als ausdrückliche Ausnahme je Client."
+
+[[capability]]
+tag = "identity.oauth2"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/integrations/oauth2.md"
+text_en = "OAuth 2.0 authorisation code grant and client credentials, token introspection, revocation, token exchange (RFC 8693)."
+text_de = "OAuth 2.0 Authorization-Code und Client-Credentials, Introspection, Widerruf, Token-Exchange (RFC 8693)."
+
+[[capability]]
+tag = "identity.ldap"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/integrations/ldap.md"
+text_en = "Read-only LDAP and LDAPS (bind, search, compare, whoami). No writes through LDAP."
+text_de = "LDAP und LDAPS nur lesend (Bind, Suche, Vergleich, whoami). Kein Schreiben über LDAP."
+
+[[capability]]
+tag = "identity.radius"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/integrations/radius.md"
+text_en = "RADIUS through the separate kanidm/radius component (MSCHAPv2, EAP-TLS); each account has its own RADIUS credential."
+text_de = "RADIUS über die getrennte Komponente kanidm/radius (MSCHAPv2, EAP-TLS); jedes Konto hat ein eigenes RADIUS-Passwort."
+
+[[capability]]
+tag = "identity.pam"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/integrations/pam_and_nsswitch.md"
+text_en = "PAM and nsswitch for Linux and BSD clients through kanidm-unixd (pam_kanidm, nss_kanidm)."
+text_de = "PAM und nsswitch für Linux- und BSD-Clients über kanidm-unixd (pam_kanidm, nss_kanidm)."
+
+[[capability]]
+tag = "identity.ssh-keys"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/integrations/ssh_key_distribution.md"
+text_en = "Public SSH keys on persons and service accounts, distributed with kanidm_ssh_authorizedkeys."
+text_de = "Öffentliche SSH-Schlüssel an Personen und Dienstkonten, verteilt mit kanidm_ssh_authorizedkeys."
+
+[[capability]]
+tag = "identity.passkeys"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/supported_features.md"
+text_en = "WebAuthn Level 3 passkeys, attested passkeys with FIDO MDS checks."
+text_de = "WebAuthn-Level-3-Passkeys, bestätigte Passkeys mit FIDO-MDS-Prüfung."
+
+[[capability]]
+tag = "identity.scim"
+relation = "provides"
+support = "unstable"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/supported_features.md"
+text_en = "SCIM only for importing from another identity provider (RFC 7644 bulk) and a young /scim/v1 interface; no stable provisioning server. Not used (ADR 0047)."
+text_de = "SCIM nur zum Einlesen aus einem anderen Anbieter (RFC 7644 Bulk) und eine junge /scim/v1-Schnittstelle; kein stabiler Provisionierungs-Server. Wird nicht genutzt (ADR 0047)."
+
+[[capability]]
+tag = "identity.accounts"
+relation = "provides"
+support = "yes"
+source = "https://github.com/kanidm/kanidm/blob/v1.12.0/book/src/accounts/intro.md"
+text_en = "Persons, service accounts and groups; managed through the REST API and client (ADR 0047: FreeSynergy sets the truth, Kanidm follows)."
+text_de = "Personen, Dienstkonten und Gruppen; verwaltet über REST-API und Client (ADR 0047: FreeSynergy legt fest, Kanidm gleicht an)."
+
+[[capability]]
+tag = "people.persons"
+relation = "recommends"
+support = "yes"
+source = "https://github.com/FreeSynergy/fs-documentation/blob/main/conventions/decisions/0068-faehigkeiten-und-spiegel.md"
+text_en = "Kanidm can use something that manages persons and groups (fs-people, fs-groups); it also runs alone."
+text_de = "Kanidm kann etwas nutzen, das Personen und Gruppen verwaltet (fs-people, fs-groups); es läuft auch allein."

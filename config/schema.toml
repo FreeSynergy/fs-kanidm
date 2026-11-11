@@ -1,0 +1,97 @@
+# Describes the fields of the config files: documentation, export and secret check come from here.
+# secret = true means the file must carry a ${vault:<path>} placeholder for it, never a value.
+
+[[file]]
+path = "config/server.toml"
+
+  [[file.field]]
+  key = "version"
+  type = "string"
+  default = "2"
+  en = "Configuration file version."
+  de = "Version der Konfigurationsdatei."
+
+  [[file.field]]
+  key = "domain"
+  type = "string"
+  secret = false
+  vault = "fs/kanidm/domain"
+  en = "DNS name of the server. Must match the real name; changing it later needs `kanidmd domain rename`. Value from the vault (per installation)."
+  de = "DNS-Name des Servers. Muss dem echten Namen entsprechen; späteres Ändern braucht `kanidmd domain rename`. Wert aus dem Tresor (je Installation)."
+
+  [[file.field]]
+  key = "origin"
+  type = "string"
+  en = "WebAuthn origin: https:// plus the domain."
+  de = "WebAuthn-Origin: https:// plus Domain."
+
+  [[file.field]]
+  key = "bindaddress"
+  type = "string"
+  default = "127.0.0.1:8443"
+  en = "HTTPS listen address; loopback, because Zentinel is the public gate."
+  de = "HTTPS-Adresse; nur Loopback, weil Zentinel das öffentliche Tor ist."
+
+  [[file.field]]
+  key = "db_path"
+  type = "path"
+  default = "/srv/freesynergy/kanidm/kanidm.db"
+  en = "Database file; all data lives under /srv/freesynergy (encrypted, backed up)."
+  de = "Datenbankdatei; alle Daten liegen unter /srv/freesynergy (verschlüsselt, gesichert)."
+
+  [[file.field]]
+  key = "db_fs_type"
+  type = "string"
+  default = "other"
+  en = "File system tuning: `zfs` (64k pages, needs recordsize=64k) or `other`."
+  de = "Dateisystem-Abstimmung: `zfs` (64k-Seiten, recordsize=64k nötig) oder `other`."
+
+  [[file.field]]
+  key = "tls_chain"
+  type = "path"
+  default = "/etc/kanidmd/tls/chain.pem"
+  en = "Public certificate chain (PEM)."
+  de = "Öffentliche Zertifikatskette (PEM)."
+
+  [[file.field]]
+  key = "tls_key"
+  type = "path"
+  secret = true
+  vault = "fs/kanidm/tls-key#file"
+  en = "Private TLS key (PEM). The vault writes the file; the path in the template is a placeholder."
+  de = "Privater TLS-Schlüssel (PEM). Der Tresor schreibt die Datei; der Pfad im Muster ist ein Platzhalter."
+
+  [[file.field]]
+  key = "log_level"
+  type = "string"
+  default = "info"
+  en = "Log level: info, debug or trace. Logs never contain secrets."
+  de = "Log-Stufe: info, debug oder trace. Logs enthalten keine Geheimnisse."
+
+  [[file.field]]
+  key = "http_client_address_info.x-forward-for"
+  type = "list"
+  default = '["127.0.0.1"]'
+  en = "Trusted proxies whose X-Forwarded-For header is believed (Zentinel on the same host)."
+  de = "Vertrauenswürdige Proxys, deren X-Forwarded-For geglaubt wird (Zentinel auf demselben Rechner)."
+
+  [[file.field]]
+  key = "online_backup.path"
+  type = "path"
+  default = "/srv/freesynergy/kanidm/backups/"
+  en = "Where online backups are written."
+  de = "Ziel der Online-Sicherungen."
+
+  [[file.field]]
+  key = "online_backup.schedule"
+  type = "cron"
+  default = "00 22 * * *"
+  en = "Backup schedule (UTC)."
+  de = "Zeitplan der Sicherung (UTC)."
+
+  [[file.field]]
+  key = "online_backup.versions"
+  type = "integer"
+  default = "7"
+  en = "Number of backups kept."
+  de = "Anzahl der behaltenen Sicherungen."

@@ -1,0 +1,62 @@
+# Mirror description (ADR 0068): what we publish, where it comes from, how it was checked and signed.
+# Read by scripts/repo_tool.py and by .github/workflows/mirror.yml. Nothing in here is a secret.
+
+[repo]
+name = "fs-kanidm"
+adr = ["0068", "0067", "0054", "0047"]
+
+[upstream]
+name = "Kanidm"
+version = "1.12.0"
+released = "2026-11-01"
+license = "MPL-2.0"
+homepage = "https://kanidm.github.io/kanidm/stable/"
+repository = "https://github.com/kanidm/kanidm"
+
+# Kanidm publishes no signed packages: GitHub releases carry no files, the tag and the commit are unsigned, the containers
+# carry no signature, and the Debian PPA is community-made and still at 1.11.2 (checked 2026-11-11).
+# So we build from source ourselves (ADR 0068: "built only where a format is missing") and sign with our own key.
+[source]
+repository = "https://github.com/kanidm/kanidm"
+tag = "v1.12.0"
+tag_signed = false
+commit = "a52b723ce8efb1f4d0a6bc2a2c36b4071f95317d"
+# The workflow refuses to build unless `git ls-remote <repository> refs/tags/<tag>` still resolves to exactly this commit.
+check = "tag-resolves-to-pinned-commit"
+
+[build]
+where = "GitHub Actions, .github/workflows/mirror.yml (never on a developer machine)"
+profile = "release_debian"            # KANIDM_BUILD_PROFILE: paths for a Debian 13 package (/etc/kanidmd, /usr/share/kanidmd/static)
+fork = "FreeSynergy/kanidm"           # build-only fork (ADR 0015); no changes; fixes go upstream
+targets = ["x86_64-unknown-linux-gnu"]
+
+[signing]
+method = "OpenPGP detached (.asc) per file, plus SHA256SUMS.txt; SLSA build provenance by GitHub"
+key_fingerprint = "16A4A3EE563AEF51FCF0C55DED7B57C4A1904342"   # FreeSynergy Release, same key as fs-release and fs-catalog
+public_key = "https://github.com/FreeSynergy/fs-release/blob/main/release-signing-key.asc"
+
+[[artifact]]
+name = "kanidm-1.12.0-linux-x86_64.tar.gz"
+kind = "binary"
+contents = "kanidmd, kanidm, kanidm_unixd (+tasks, kanidm-unix), kanidm_ssh_authorizedkeys, pam_kanidm.so, libnss_kanidm.so, web UI files"
+verification = "built-from-pinned-commit"
+
+[[artifact]]
+name = "kanidm-1.12.0-source.tar.gz"
+kind = "source"
+contents = "git archive of the pinned commit (MPL-2.0: source of the same version travels with the binary)"
+verification = "built-from-pinned-commit"
+
+[[artifact]]
+name = "kanidm-1.12.0.spdx.json"
+kind = "sbom"
+verification = "generated-from-Cargo.lock"
+
+[[artifact]]
+name = "LICENSE-MPL-2.0.md"
+kind = "licence"
+verification = "copied-from-pinned-commit"
+
+[not_mirrored]
+debian_ppa = "kanidm.github.io/kanidm_ppa stable is 1.11.2 (2026-09-20), community-signed by one person: not mirrored (decision of the project)"
+containers = "kanidm/server:1.12.0 is unsigned: used only for local tests, never mirrored"
