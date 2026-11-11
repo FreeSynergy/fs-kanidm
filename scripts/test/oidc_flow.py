@@ -198,6 +198,10 @@ def phase_kanidm():
     s, *_ = api("POST", "/v1/oauth2/_basic", admin, {"attrs": {"name": ["tuwunel"], "displayname": ["Tuwunel"],
                 "oauth2_rs_origin": [redirect], "oauth2_rs_origin_landing": ["http://localhost:8008/"]}})
     result("create OAuth2 client", s in (200, 201), s)
+    # Kanidm sends the account name with the domain (tester@idm...) as preferred_username by default; Matrix names cannot contain
+    # the @ and the domain. The client is therefore set to the short name (kanidm system oauth2 prefer-short-username tuwunel).
+    s, *_ = api("PATCH", "/v1/oauth2/tuwunel", admin, {"attrs": {"oauth2_prefer_short_username": ["true"]}})
+    result("OAuth2 client prefers the short username", s in (200, 201), s)
     s, *_ = api("POST", "/v1/oauth2/tuwunel/_scopemap/testers", admin, ["openid", "profile", "email"])
     result("scope map", s in (200, 201), s)
     s, _, sec, _ = api("GET", "/v1/oauth2/tuwunel/_basic_secret", admin)
@@ -246,6 +250,7 @@ def phase_kanidm():
            and claims.get("nonce") == nonce and hdr.get("alg") == "ES256", hdr.get("alg"))
     s, _, ui, _ = call("GET", f"{IDM}/oauth2/openid/tuwunel/userinfo", headers={"Authorization": f"Bearer {tok['access_token']}"})
     result("userinfo for the person", s == 200 and (ui or {}).get("sub") == claims.get("sub"), s)
+    result("preferred_username is the short name (valid as Matrix name)", (ui or {}).get("preferred_username") == "tester", (ui or {}).get("preferred_username"))
 
 
 def phase_tuwunel():
@@ -301,7 +306,19 @@ def phase_tuwunel():
     if not ltok:
         return
     s, _, js, _ = call("POST", f"{MATRIX}/_matrix/client/v3/login", {"type": "m.login.token", "token": ltok})
-    result("Matrix login with the SSO token gives an access token", s == 200 and bool((js or {}).get("access_token")) and (js or {}).get("user_id", "").startswith("@"), s)
+    ok = s == 200 and bool((js or {}).get("access_token")) and (js or {}).get("user_id", "").startswith("@")
+    result("Matrix login with the SSO token gives an access token", ok, s)
+    if not ok:
+        return
+    result("Matrix user id is @tester:matrix.test.local", js.get("user_id") == "@tester:matrix.test.local", js.get("user_id"))
+    # Admin status without secrets: Tuwunel admins are the members of the admin room #admins:<server_name>. The access token stays in memory.
+    hdr = {"Authorization": f"Bearer {js['access_token']}"}
+    s1, _, room, _ = call("GET", f"{MATRIX}/_matrix/client/v3/directory/room/%23admins%3Amatrix.test.local", headers=hdr)
+    s2, _, joined, _ = call("GET", f"{MATRIX}/_matrix/client/v3/joined_rooms", headers=hdr)
+    admin_room = (room or {}).get("room_id") if isinstance(room, dict) else None
+    in_admin_room = bool(admin_room) and admin_room in ((joined or {}).get("joined_rooms") or [])
+    result("admin room can be inspected (alias resolves, joined rooms readable)", s1 == 200 and s2 == 200 and bool(admin_room), f"{s1}/{s2}")
+    result("the first single-sign-on user is NOT a server admin", s1 == 200 and s2 == 200 and not in_admin_room)
 
 
 if __name__ == "__main__":
