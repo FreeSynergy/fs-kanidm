@@ -2,8 +2,9 @@
 # Selftest of verify-mirror.sh. Throw-away keys are generated at run time inside a temporary GNUPGHOME (mktemp -d, mode 0700, removed at
 # the end); no real key and no secret of ours is involved, nothing is printed from the keys.
 # green: primary key; signing SUBkey of the expected primary.  red: other key (also its subkey), expired subkey, expired primary,
-# revoked key, expired signature, tampered file, no signatures, one unsigned file, file missing from SHA256SUMS.txt, empty directory,
-# wrong key file. Expiry uses --faked-system-time (keys created and used in 2020 with a one-day life): no sleeping, no dependence on the
+# revoked key, revoked signing subkey, expired signature, tampered file, no signatures, one unsigned file, file missing from SHA256SUMS.txt, empty directory,
+# wrong key file; ROTATION (green): an old expired or revoked signing subkey sits in the key file next to a good signature by the
+# new subkey. Expiry uses --faked-system-time (keys created and used in 2020 with a one-day life): no sleeping, no dependence on the
 # speed of the runner. Each single status word of the reject list is also tested ALONE with a canned gpg output (FS_VERIFY_GPG), so
 # removing one word from verify-mirror.sh is noticed. Two VALIDSIG lines with different primaries are red.
 set -uo pipefail
@@ -23,6 +24,11 @@ PAST=(--faked-system-time 20200101T000000)      # keys that must be expired toda
 ASUB_EXP=$(gpg --batch --list-keys --with-colons p@test.invalid | awk -F: '/^sub:/{n++} /^fpr:/&&n==2{print $10; exit}')
 "${G[@]}" "${PAST[@]}" --quick-gen-key "shortlived <s@test.invalid>" ed25519 sign 1d 2>/dev/null; S=$(fpr s@test.invalid)
 "${G[@]}" "${PAST[@]}" --quick-gen-key "revoked <r@test.invalid>" ed25519 sign never 2>/dev/null; R=$(fpr r@test.invalid)
+"${G[@]}" "${PAST[@]}" --quick-gen-key "rot <v@test.invalid>" ed25519 sign never 2>/dev/null; V=$(fpr v@test.invalid)
+"${G[@]}" "${PAST[@]}" --quick-add-key "$V" ed25519 sign never 2>/dev/null                  # old signing subkey ...
+"${G[@]}" --faked-system-time 20200102T000000 --quick-add-key "$V" ed25519 sign never 2>/dev/null   # ... replaced by a new one
+VOLD=$(gpg --batch --list-keys --with-colons v@test.invalid | awk -F: '/^sub:/{n++} /^fpr:/&&n==1{print $10; exit}')
+VNEW=$(gpg --batch --list-keys --with-colons v@test.invalid | awk -F: '/^sub:/{n++} /^fpr:/&&n==2{print $10; exit}')
 "${G[@]}" "${PAST[@]}" --quick-gen-key "sigexp <x@test.invalid>" ed25519 sign never 2>/dev/null; X=$(fpr x@test.invalid)
 sign() { gpg --batch -q --armor --detach-sign "${SIGNOPTS[@]}" -u "$1" -o "$2.asc" "$2" 2>/dev/null; }
 SIGNOPTS=()
@@ -69,6 +75,13 @@ pub p@test.invalid > "$t/a2.asc"
                                  expect "signature by an EXPIRED primary key = red" 1 "$t/expprim" "$t/s.asc" "$S" EXPKEYSIG
                                  expect "EXPIRED signature = red" 1 "$t/expsig" "$t/x.asc" "$X" EXPSIG
                                  expect "signature by a REVOKED key = red" 1 "$t/revoked" "$t/r.asc" "$R" REVKEYSIG
+# rotation with REAL keys (temporary GNUPGHOME): the old signing subkey is expired / revoked, a new one signs
+mk "$t/rotnew" "${ASUB}!"; mk "$t/rotold" "${VOLD}!"; mk "$t/rotnewv" "${VNEW}!"
+printf 'key 1\nrevkey\ny\n0\n\ny\nsave\n' | gpg --yes --no-tty --pinentry-mode loopback --passphrase '' --command-fd 0 --edit-key "$V" >/dev/null 2>&1
+pub v@test.invalid > "$t/v.asc"
+                                 expect "ROTATED: old EXPIRED subkey in the key file next to a good signature by the new subkey = green" 0 "$t/rotnew" "$t/a2.asc" "$A"
+                                 expect "signature by a REVOKED signing SUBkey (revocation imported) = red" 1 "$t/rotold" "$t/v.asc" "$V" REVKEYSIG
+                                 expect "ROTATED: old REVOKED subkey in the key file next to a good signature by the new subkey = green" 0 "$t/rotnewv" "$t/v.asc" "$V"
 # each status word ALONE: canned gpg output = good signature by the right primary key plus exactly one bad status line
 mkdir "$t/mock"; cat > "$t/mock/gpg" <<'MOCK'
 #!/usr/bin/env bash
