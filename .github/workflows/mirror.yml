@@ -76,11 +76,13 @@ jobs:
           KANIDM_BUILD_PROFILE: ${{ steps.pin.outputs.profile }}
         run: |
           set -euo pipefail
-          cargo build --locked --release -p kanidm_tools --bin kanidm
-          cargo build --locked --release -p daemon --bin kanidmd
-          cargo build --locked --release --bin kanidm_ssh_authorizedkeys --bin kanidm_ssh_authorizedkeys_direct
-          cargo build --locked --release -p pam_kanidm -p nss_kanidm
-          cargo build --locked --release --features unix -p kanidm_unix_int --bin kanidm_unixd --bin kanidm_unixd_tasks --bin kanidm-unix
+          cargo build --release -p kanidm_tools --bin kanidm
+          cargo build --release -p daemon --bin kanidmd
+          cargo build --release --bin kanidm_ssh_authorizedkeys --bin kanidm_ssh_authorizedkeys_direct
+          cargo build --release -p pam_kanidm -p nss_kanidm
+          cargo build --release --features unix -p kanidm_unix_int --bin kanidm_unixd --bin kanidm_unixd_tasks --bin kanidm-unix
+          # Upstream's Cargo.lock at this commit is not fully current (--locked fails, as in upstream's own Makefile targets). Show what cargo changed.
+          git diff --stat -- Cargo.lock
       - name: Stage and pack (reproducible tar)
         env:
           V: ${{ steps.pin.outputs.version }}
