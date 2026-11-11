@@ -5,8 +5,11 @@ Phase 'kanidm': through Zentinel set up a person, a group and an OAuth2 client i
 authorisation-code flow with PKCE as that person and check the id_token claims and userinfo.
 Phase 'tuwunel': sign in to Tuwunel through single sign-on with Kanidm and get a Matrix access token.
 
-Secrets (ADR 0054): this script creates the person's password and reads the admin password from the environment; it
-never prints, logs or writes them except to the run-time tmpfs volume (/tls) that the test deletes. Output: PASS/FAIL lines only.
+Secrets (ADR 0054): this script runs in a long-lived container of the test pod. The admin password and the CA arrive as Podman
+secrets (/run/secrets/...); the person's password, the TOTP secret and the OAuth2 client secret are created here and live only in
+the container's own tmpfs (/state, mode 0700, files 0600) until the container is removed. Nothing is put into environment
+variables. Output: PASS/FAIL lines only. The one exception is the mode `export-oidc`, whose ENTIRE stdout is the client secret:
+the test script pipes it straight into `podman secret create` for the Tuwunel container (it is never shown or stored elsewhere).
 """
 import base64
 import hashlib
@@ -25,9 +28,21 @@ import urllib.request
 
 IDM = os.environ.get("IDM_URL", "")          # https://idm.test.local:9443 (through Zentinel)
 MATRIX = os.environ.get("MATRIX_URL", "http://localhost:8008")
-STATE = "/tls"                        # tmpfs volume, removed by the test
-CTX = ssl.create_default_context(cafile=f"{STATE}/ca.pem") if os.path.exists(f"{STATE}/ca.pem") else ssl.create_default_context()
+STATE = "/state"                      # tmpfs of this container (mode 0700), gone with the container
+CA = "/run/secrets/fs-ca"
+CTX = ssl.create_default_context(cafile=CA) if os.path.exists(CA) else ssl.create_default_context()
 FAILED = []
+
+
+def write_private(path, text):
+    """Create the file with mode 0600 from the start (no window with the default umask)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+
+
+def export_oidc():
+    sys.stdout.write(open(f"{STATE}/oidc-secret").read())
 
 
 def result(name, ok, extra=""):
@@ -125,7 +140,7 @@ def api(method, path, tok, body=None):
 
 
 def phase_kanidm():
-    admin = auth("idm_admin", os.environ["KANIDM_ADMIN_PW"], privileged=True)
+    admin = auth("idm_admin", open("/run/secrets/fs-admin-pw").read().strip(), privileged=True)
     result("login as idm_admin through Zentinel", bool(admin))
     if not admin:
         return
@@ -153,8 +168,7 @@ def phase_kanidm():
     result("set person credential (password + TOTP)", s1 == 200 and s2 == 200 and bool(factor) and s4 == 200, f"{s1}/{s2}/{s4}")
     if not factor:
         return
-    open(f"{STATE}/.tester", "w").write(json.dumps({"pw": pw, "factor": factor}))
-    os.chmod(f"{STATE}/.tester", 0o600)
+    write_private(f"{STATE}/.tester", json.dumps({"pw": pw, "factor": factor}))
     redirect = os.environ.get("TUWUNEL_CALLBACK", "http://localhost:8008/_matrix/client/unstable/login/sso/callback/tuwunel")
     s, *_ = api("POST", "/v1/oauth2/_basic", admin, {"attrs": {"name": ["tuwunel"], "displayname": ["Tuwunel"],
                 "oauth2_rs_origin": [redirect], "oauth2_rs_origin_landing": ["http://localhost:8008/"]}})
@@ -164,8 +178,7 @@ def phase_kanidm():
     s, _, sec, _ = api("GET", "/v1/oauth2/tuwunel/_basic_secret", admin)
     result("read client secret", s == 200 and isinstance(sec, str))
     if isinstance(sec, str):
-        open(f"{STATE}/oidc-secret", "w").write(sec)
-        os.chmod(f"{STATE}/oidc-secret", 0o644)
+        write_private(f"{STATE}/oidc-secret", sec)
     # discovery through Zentinel
     s, _, disc, _ = call("GET", f"{IDM}/oauth2/openid/tuwunel/.well-known/openid-configuration")
     result("OIDC discovery through Zentinel", s == 200 and disc and disc.get("issuer", "").endswith("/oauth2/openid/tuwunel"))
@@ -223,18 +236,21 @@ def phase_tuwunel():
     back = "http://localhost:3000/after"
     s, h, _, _ = call("GET", f"{MATRIX}/_matrix/client/v3/login/sso/redirect/tuwunel?redirectUrl={urllib.parse.quote(back)}", jar=jar)
     loc = h.get("location") or h.get("Location") or ""
-    result("Tuwunel redirects to Kanidm authorise", s in (302, 303, 307) and "/oauth2/" in loc, s)
-    if "/oauth2/" not in loc:
+    pu = urllib.parse.urlparse(loc)
+    # Only scheme, host and path are shown; the query (state, nonce, client_id, redirect_uri) is cut off.
+    result("Tuwunel redirects to Kanidm authorise", s in (302, 303, 307) and "/oauth2" in pu.path, f"{s} {pu.scheme}://{pu.netloc}{pu.path}")
+    if "/oauth2" not in pu.path:
         return
     user = auth("tester", pw, factor=factor)
     u = urllib.parse.urlparse(loc)
-    s, _, js, _ = call("GET", f"{IDM}{u.path}?{u.query}", headers={"Authorization": f"Bearer {user}"})
-    consent = (js or {}).get("ConsentRequested") or (js or {}).get("consentrequested")
-    if consent:
+    # Kanidm's browser entry is /ui/oauth2 (the web UI then calls the API); headless we call the API endpoint with the same query.
+    # Consent was already given in phase 1, so Kanidm answers with a redirect straight back to the client; otherwise it asks for consent.
+    s, h, js, _ = call("GET", f"{IDM}/oauth2/authorise?{u.query}", headers={"Authorization": f"Bearer {user}"})
+    loc2 = h.get("location", "")
+    consent = (js.get("ConsentRequested") or js.get("consentrequested")) if isinstance(js, dict) else None
+    if consent and not loc2:
         s, h, _, _ = call("GET", f"{IDM}/oauth2/authorise/permit?token={urllib.parse.quote(consent['consent_token'])}", headers={"Authorization": f"Bearer {user}"})
-        loc2 = h.get("location") or h.get("Location") or ""
-    else:
-        loc2 = ""
+        loc2 = h.get("location", "")
     result("Kanidm sends the browser back to Tuwunel with a code", loc2.startswith(MATRIX) or "/sso/callback/" in loc2, s)
     if not loc2:
         return
@@ -249,5 +265,5 @@ def phase_tuwunel():
 
 
 if __name__ == "__main__":
-    {"kanidm": phase_kanidm, "tuwunel": phase_tuwunel, "selftest": selftest}[sys.argv[1]]()
+    {"kanidm": phase_kanidm, "tuwunel": phase_tuwunel, "selftest": selftest, "export-oidc": export_oidc}[sys.argv[1]]()
     sys.exit(1 if FAILED else 0)

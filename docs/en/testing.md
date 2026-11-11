@@ -1,0 +1,15 @@
+# Local test of the server stack
+
+`scripts/test/podman-stack.sh` starts Zentinel, Kanidm and Tuwunel in one rootless Podman pod (shared loopback, like on the server) and checks: Zentinel validates and serves our rendered KDL; Kanidm runs behind it; a person signs in with password and TOTP and completes an OIDC authorisation-code flow with PKCE (id_token claims, ES256, userinfo); Tuwunel offers and completes single sign-on with Kanidm.
+
+Rules the script enforces:
+
+- **SELinux stays Enforcing.** Bind mounts carry `:Z` and hold only non-secret rendered configs (RAM directory under `/dev/shm`). After the run the script reads the journal (`journalctl -b -t setroubleshoot --since <start>`, no root); any denial is red. A journal that cannot be read is red too: the script writes a random marker line with `logger` and must find it again. `test_avc_check.sh` tests this with a mock `journalctl` (clean, German and English alarm, unreadable hint, missing marker, failure).
+- **Secrets live only in containers.** TLS keys are generated inside a container (tmpfs, mode 0700) and handed over as Podman secrets created from stdin; the Kanidm admin password goes from the recovery output into a Podman secret without being printed; the test person's password, TOTP secret and the OAuth2 client secret are created and kept inside the runner container (tmpfs, files 0600). Nothing goes into host files or environment variables. All secrets are removed at the end.
+- **Hardening.** Every container: `--restart=no`, `--pids-limit`, `--cap-drop=all` (no `--cap-add` was needed), `--security-opt no-new-privileges`, memory limit at most 1 GiB. One run at a time (lock file and pod check). A crashed container stays down and the test is red.
+- **Secret scan** (`scan_secrets.sh`, ADR 0054) runs before the test over all three repos and at the end over the run's output. Its selftest proves that every one of its patterns detects a prepared example. CI additionally runs gitleaks (`.github/workflows/secrets-scan.yml`).
+- **Pinned image.** The Tuwunel image is pinned by digest and its revision label must equal the commit in `fs-tuwunel/mirror.toml`.
+
+Dry run without containers: `shellcheck scripts/test/*.sh`, `scripts/test/test_avc_check.sh`, `scripts/test/scan_secrets.sh --selftest`, `python3 -I scripts/test/oidc_flow.py selftest`.
+
+Language: [Deutsch](../de/testing.md)
