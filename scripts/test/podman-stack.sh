@@ -31,9 +31,15 @@ if podman pod exists "$pod" 2>/dev/null; then echo "REFUSED: pod $pod already ex
 start=$(date '+%Y-%m-%d %H:%M:%S'); t0=$(date +%s)
 work=$(mktemp -d -p /dev/shm fs-test.XXXXXX)   # RAM only
 tls=$work/tls
+say() { printf '== %s\n' "$*"; }
+say "secret scan (ADR 0054): selftest, then every file of the three repos"
+"$here/scan_secrets.sh" --selftest >/dev/null && echo "PASS secret scan selftest (prepared example secrets are detected)" || { echo "FAIL secret scan selftest"; exit 1; }
+for r in "$kanidm_repo" "$zentinel_repo" "$tuwunel_repo"; do
+  "$here/scan_secrets.sh" --repo "$r" && echo "PASS no secret pattern in $(basename "$r")" || { echo "FAIL secret pattern found (file:line above, text not shown)"; exit 1; }
+done
+exec > >(tee -a "$work/run.log") 2>&1   # everything below is also scanned at the end
 cleanup() { set +e; podman pod rm -f "$pod" >/dev/null 2>&1; podman unshare rm -rf "$work" 2>/dev/null; rm -rf "$work"; }
 trap cleanup EXIT
-say() { printf '== %s\n' "$*"; }
 quiet_logs() { podman logs "$1" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E -i 'error|panic|fatal' | grep -v -i -E 'token|secret|password' | cut -c1-240 | tail -n 8 || true; }
 R="--restart=no"
 
@@ -108,6 +114,9 @@ for c in fs-test-zentinel fs-test-kanidm fs-test-tuwunel; do
   if podman container exists "$c" 2>/dev/null && [ "$(podman inspect -f '{{.State.Running}}' "$c")" != true ]; then echo "FAIL container $c is not running (no restart policy: it stays down)"; rc=1; fi
 done
 say "memory in use (limits: zentinel 256m, kanidm 1g, tuwunel 1g)"; podman stats --no-stream --format '{{.Name}} {{.MemUsage}}' 2>/dev/null | grep fs-test || true
+
+sleep 1
+"$here/scan_secrets.sh" "$work/run.log" && echo "PASS no secret pattern in this run's output" || { echo "FAIL secret pattern in the run output"; rc=1; }
 
 say "SELinux check (setroubleshoot since $start, no root)"
 sleep 3
