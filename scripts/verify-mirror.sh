@@ -4,8 +4,8 @@
 #   verify-mirror.sh [--fingerprint <primary-fpr>] <release-dir> <public-key.asc>
 # The expected PRIMARY fingerprint comes from mirror.toml ([signing] key_fingerprint) unless --fingerprint is given (used by the selftest).
 # GREEN only if gpg reports GOODSIG and VALIDSIG whose primary-key fingerprint equals the expected one (a signing subkey of that
-# primary key is fine). RED on any other status line: EXPKEYSIG, EXPSIG, KEYEXPIRED, REVKEYSIG, KEYREVOKED, BADSIG, ERRSIG, NO_PUBKEY, or
-# no GOODSIG/VALIDSIG at all. No .asc at all, a file without signature, or an empty directory is a failure. Nothing secret is read or printed.
+# primary key is fine). RED on any other status line: EXPKEYSIG, EXPSIG, REVKEYSIG, BADSIG, ERRSIG, NO_PUBKEY, or
+# no GOODSIG/VALIDSIG at all; EVERY VALIDSIG line of a signature must carry the expected primary fingerprint. No .asc at all, a file without signature, or an empty directory is a failure. Nothing secret is read or printed.
 set -euo pipefail
 want=""
 if [ "${1:-}" = "--fingerprint" ]; then want=${2:?}; shift 2; fi
@@ -23,7 +23,10 @@ gpg --batch -q --import "$key" 2>/dev/null
 gpg --batch --list-keys --with-colons 2>/dev/null | awk -F: '/^pub:/{p=1;next} p&&/^fpr:/{print $10; p=0}' | grep -qx "$want" \
   || { echo "FAIL key file does not contain the expected primary key $want"; exit 1; }
 
-BAD='EXPKEYSIG|EXPSIG|KEYEXPIRED|REVKEYSIG|KEYREVOKED|BADSIG|ERRSIG|NO_PUBKEY'
+# KEYEXPIRED / KEYREVOKED are NOT in this list on purpose: gpg prints them for ANY expired or revoked (sub)key it merely considers in the key
+# file (e.g. an old rotated signing subkey), also when the signature itself is good. A signature made BY an expired or revoked key never gets
+# GOODSIG (gpg says EXPKEYSIG / REVKEYSIG instead), and GOODSIG is required below, so nothing bad slips through.
+BAD='EXPKEYSIG|EXPSIG|REVKEYSIG|BADSIG|ERRSIG|NO_PUBKEY'
 fail=0; n=0
 while IFS= read -r -d '' f; do
   case $f in *.asc) continue ;; esac
@@ -33,8 +36,10 @@ while IFS= read -r -d '' f; do
   if printf '%s\n' "$status" | grep -q -E "^\[GNUPG:\] ($BAD)( |$)"; then
     echo "FAIL $name: $(printf '%s\n' "$status" | grep -o -E "^\[GNUPG:\] ($BAD)" | cut -d' ' -f2 | sort -u | paste -sd, -)"; fail=1; continue
   fi
-  primary=$(printf '%s\n' "$status" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print $12}' | head -n 1)
-  if printf '%s\n' "$status" | grep -q '^\[GNUPG:\] GOODSIG ' && [ "${primary^^}" = "$want" ]; then
+  mapfile -t primaries < <(printf '%s\n' "$status" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print toupper($12)}')
+  allok=1; [ "${#primaries[@]}" -gt 0 ] || allok=0
+  for p in "${primaries[@]}"; do [ "$p" = "$want" ] || allok=0; done
+  if printf '%s\n' "$status" | grep -q '^\[GNUPG:\] GOODSIG ' && [ "$allok" = 1 ]; then
     echo "signature ok: $name"
   else
     echo "FAIL $name: no good signature by primary key $want"; fail=1
