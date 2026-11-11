@@ -5,6 +5,10 @@ name: mirror
 on:
   workflow_dispatch:
     inputs:
+      draft_release:
+        description: "Also create the DRAFT GitHub release (never public; a person publishes it)"
+        type: boolean
+        default: false
       build_only:
         description: "Test build: no signing, no release, artifact upload only (for CI checks before the signing secrets are set)"
         type: boolean
@@ -115,8 +119,13 @@ jobs:
           private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
       - if: ${{ !inputs.build_only }}
-        name: Verify our own signatures before releasing
-        run: scripts/verify-mirror.sh dist
+        name: Verify our signatures against the project's public key (fingerprint from mirror.toml; nothing secret is printed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/FreeSynergy/fs-release/contents/release-signing-key.asc --jq .content | base64 -d > "$RUNNER_TEMP/release-signing-key.asc"
+          scripts/verify-mirror.sh dist "$RUNNER_TEMP/release-signing-key.asc"
       - if: ${{ !inputs.build_only }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -125,7 +134,7 @@ jobs:
         with:
           name: kanidm-mirror
           path: dist
-      - if: ${{ !inputs.build_only }}
+      - if: ${{ !inputs.build_only && inputs.draft_release }}
         uses: FreeSynergy/fs-release/actions/draft-release@main
         with:
           tag: v${{ steps.pin.outputs.version }}
