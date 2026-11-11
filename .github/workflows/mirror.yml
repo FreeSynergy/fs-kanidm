@@ -97,7 +97,7 @@ jobs:
           install -m644 "$t/libnss_kanidm.so" "$s/usr/lib/libnss_kanidm.so.2"
           cp -r src/server/core/static "$s/usr/share/kanidmd/static"
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@"$(git -C src log -1 --format=%ct)" -C "$s" -czf "dist/kanidm-$V-linux-x86_64.tar.gz" .
-      - uses: FreeSynergy/fs-release/actions/sbom@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+      - uses: FreeSynergy/fs-release/actions/sbom@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           name: kanidm
           version: ${{ steps.pin.outputs.version }}
@@ -138,13 +138,13 @@ jobs:
         with:
           name: kanidm-unsigned
           path: dist
-      - uses: FreeSynergy/fs-release/actions/sign-files@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+      - uses: FreeSynergy/fs-release/actions/sign-files@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           mode: packages
           private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
-      - uses: FreeSynergy/fs-release/actions/checksums@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
-      - uses: FreeSynergy/fs-release/actions/sign-files@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+      - uses: FreeSynergy/fs-release/actions/checksums@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+      - uses: FreeSynergy/fs-release/actions/sign-files@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           mode: detached
           private-key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -165,7 +165,7 @@ jobs:
           path: dist
           retention-days: 3
       - if: ${{ inputs.draft_release }}
-        uses: FreeSynergy/fs-release/actions/draft-release@fbac18832673936a6586989874db388270371195 # fs-release main on 2026-11-11 (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
+        uses: FreeSynergy/fs-release/actions/draft-release@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           tag: v${{ steps.pin.outputs.version }}
           name: Kanidm
