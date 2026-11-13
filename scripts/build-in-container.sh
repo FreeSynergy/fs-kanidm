@@ -10,10 +10,12 @@ set -euo pipefail
 # Files written below belong to the runner user again (the container runs as root).
 trap 'chown -R "$HOST_UID:$HOST_GID" /work/src /work/dist' EXIT
 
-# 1. Build dependencies (same set as the former Ubuntu job: pam, udev, openssl, clang). CRB holds some -devel packages on EL9.
-dnf -y -q install dnf-plugins-core
-dnf config-manager --set-enabled crb
-dnf -y -q install gcc gcc-c++ make cmake clang pkgconf-pkg-config openssl-devel pam-devel systemd-devel binutils git-core tar gzip xz findutils
+# 1. Build dependencies, all from AlmaLinux's own AppStream/BaseOS repositories (rpm signatures are checked by dnf; no EPEL, no CRB).
+#    Upstream's .cargo/config.toml links with `clang -fuse-ld=lld` => clang AND lld are required. The rest follows upstream's own lists
+#    (scripts/install_ubuntu_dependencies.sh, server/Dockerfile, tools/Dockerfile): gcc, make, cmake, pam-devel, sqlite-devel,
+#    udev (systemd-devel), openssl-devel, pkg-config, automake/autoconf/gawk. Package VERSIONS are those of the day (not pinned; the image digest is).
+dnf -y -q install gcc gcc-c++ make cmake clang lld pkgconf-pkg-config openssl-devel pam-devel sqlite-devel systemd-devel automake autoconf gawk binutils git-core tar gzip xz findutils
+clang --version | head -n1; ld.lld --version
 ldd --version | head -n1   # glibc must be 2.34 here
 
 # 2. Rust toolchain: the exact version, rustup-init checked against a pinned sha256.
