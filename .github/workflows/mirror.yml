@@ -1,8 +1,10 @@
 # Build Kanidm from the commit pinned in mirror.toml, mirror its source, sign everything with the FreeSynergy release key
 # (existing secrets GPG_PRIVATE_KEY / GPG_PASSPHRASE, used only by fs-release's sign-files action) and create a DRAFT release.
 # Never publishes. Runs only by hand (workflow_dispatch).
-# Two jobs: `build` runs foreign build code WITHOUT secrets and with read-only rights; `sign` has the secrets and the write rights but runs
-# no foreign code, only fs-release actions pinned by commit SHA and the checked-in verify script.
+# Three jobs: `build` runs foreign build code WITHOUT secrets and with read-only rights, inside an AlmaLinux 9 container pinned by digest (glibc 2.34:
+# runs on Debian 12, Ubuntu 22.04, EL9 and newer) and makes the tarball AND the .deb; `smoke` installs the .deb on Debian 12, Ubuntu 22.04 and 24.04
+# (no secrets, read-only); `sign` has the secrets and the write rights but runs no foreign code, only fs-release actions pinned by commit SHA and the
+# checked-in verify script.
 name: mirror
 on:
   workflow_dispatch:
@@ -35,7 +37,10 @@ jobs:
           m = tomllib.load(open("mirror.toml", "rb"))
           print("repository=" + m["source"]["repository"]); print("tag=" + m["source"]["tag"])
           print("commit=" + m["source"]["commit"]); print("version=" + m["upstream"]["version"])
-          print("profile=" + m["build"]["profile"])
+          print("profile=" + m["build"]["profile"]); print("container=" + m["build"]["container"])
+          print("rust_version=" + m["build"]["rust_version"]); print("rustup_init_sha256=" + m["build"]["rustup_init_sha256"])
+          print("cargo_deb_version=" + m["build"]["cargo_deb_version"]); print("cargo_deb_sha256=" + m["build"]["cargo_deb_sha256"])
+          print("deb_version=" + m["upstream"]["version"] + "-" + str(m["build"]["deb_revision"]))
           PY
       - name: Upstream tag must still resolve to the pinned commit
         env:
@@ -66,37 +71,25 @@ jobs:
           mkdir -p dist
           git -C src archive --format=tar --prefix="kanidm-$V/" HEAD | gzip -n > "dist/kanidm-$V-source.tar.gz"
           cp src/LICENSE.md dist/LICENSE-MPL-2.0.md
-      - name: Build dependencies
-        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libpam0g-dev libudev-dev libssl-dev libsystemd-dev pkg-config clang
-      - name: Rust toolchain (as pinned by upstream rust-toolchain.toml)
-        working-directory: src
-        run: rustup toolchain install --profile minimal && cargo --version
-      - name: Build (same targets as upstream Makefile release/*)
-        working-directory: src
+      - name: "Build in the AlmaLinux 9 container (digest-pinned), then tarball and .deb"
         env:
-          KANIDM_BUILD_PROFILE: ${{ steps.pin.outputs.profile }}
-        run: |
-          set -euo pipefail
-          cargo build --release -p kanidm_tools --bin kanidm
-          cargo build --release -p daemon --bin kanidmd
-          cargo build --release --bin kanidm_ssh_authorizedkeys --bin kanidm_ssh_authorizedkeys_direct
-          cargo build --release -p pam_kanidm -p nss_kanidm
-          cargo build --release --features unix -p kanidm_unix_int --bin kanidm_unixd --bin kanidm_unixd_tasks --bin kanidm-unix
-          # Upstream's Cargo.lock at this commit is not fully current (--locked fails, as in upstream's own Makefile targets). Show what cargo changed.
-          git diff --stat -- Cargo.lock
-      - name: Stage and pack (reproducible tar)
-        env:
+          IMAGE: ${{ steps.pin.outputs.container }}
           V: ${{ steps.pin.outputs.version }}
+          PROFILE: ${{ steps.pin.outputs.profile }}
+          COMMIT: ${{ steps.pin.outputs.commit }}
+          RUST_VERSION: ${{ steps.pin.outputs.rust_version }}
+          RUSTUP_INIT_SHA256: ${{ steps.pin.outputs.rustup_init_sha256 }}
+          CARGO_DEB_VERSION: ${{ steps.pin.outputs.cargo_deb_version }}
+          CARGO_DEB_SHA256: ${{ steps.pin.outputs.cargo_deb_sha256 }}
+          DEB_VERSION: ${{ steps.pin.outputs.deb_version }}
         run: |
           set -euo pipefail
-          t=src/target/release; s=stage
-          install -d "$s/usr/sbin" "$s/usr/bin" "$s/usr/lib/security" "$s/usr/share/kanidmd"
-          install -m755 "$t/kanidmd" "$t/kanidm_unixd" "$t/kanidm_unixd_tasks" "$s/usr/sbin/"
-          install -m755 "$t/kanidm" "$t/kanidm-unix" "$t/kanidm_ssh_authorizedkeys" "$t/kanidm_ssh_authorizedkeys_direct" "$s/usr/bin/"
-          install -m644 "$t/libpam_kanidm.so" "$s/usr/lib/security/pam_kanidm.so"
-          install -m644 "$t/libnss_kanidm.so" "$s/usr/lib/libnss_kanidm.so.2"
-          cp -r src/server/core/static "$s/usr/share/kanidmd/static"
-          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@"$(git -C src log -1 --format=%ct)" -C "$s" -czf "dist/kanidm-$V-linux-x86_64.tar.gz" .
+          case "$IMAGE" in *@sha256:*) ;; *) echo "::error::build image is not pinned by digest"; exit 1 ;; esac
+          docker run --rm -v "$PWD/src:/work/src" -v "$PWD/dist:/work/dist" -v "$PWD/scripts/build-in-container.sh:/build.sh:ro" \
+            -e VERSION="$V" -e KANIDM_BUILD_PROFILE="$PROFILE" -e COMMIT="$COMMIT" -e RUST_VERSION -e RUSTUP_INIT_SHA256 \
+            -e CARGO_DEB_VERSION -e CARGO_DEB_SHA256 -e DEB_VERSION \
+            -e SOURCE_DATE_EPOCH="$(git -C src log -1 --format=%ct)" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            "$IMAGE" bash /build.sh
       - uses: FreeSynergy/fs-release/actions/sbom@30de3cd12b89c12cfbf33cfc7bbe0ffab11d8f6c # fs-release main 30de3cd (contains sign-cleanup ef7dfa0) (pinned: these actions run next to the signing key). Update: review the fs-release diff, then bump this SHA in all three mirror repos.
         with:
           name: kanidm
@@ -107,8 +100,24 @@ jobs:
           name: kanidm-unsigned
           path: dist
           retention-days: 3
-  sign:
+  smoke:
     needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kanidm-unsigned
+          path: dist
+      - name: "Install the .deb on Debian 12, Ubuntu 22.04 and Ubuntu 24.04 (images from mirror.toml, pinned by digest)"
+        run: scripts/smoke-deb.sh dist
+  sign:
+    needs: [build, smoke]
     if: ${{ !inputs.build_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30

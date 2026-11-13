@@ -7,7 +7,9 @@
 # new subkey. Expiry uses --faked-system-time (keys created and used in 2020 with a one-day life): no sleeping, no dependence on the
 # speed of the runner. Each single status word of the reject list is also tested ALONE with a canned gpg output (a wrapper named gpg
 # placed first in PATH for these cases only; the script under test has no environment switch that replaces gpg), so
-# removing one word from verify-mirror.sh is noticed. Two VALIDSIG lines with different primaries are red.
+# removing one word from verify-mirror.sh is noticed. .deb files (made here with plain `ar`, no Debian tools needed): well-formed and signed = green;
+# also green with an extra native-signature member (_gpgbuilder, as dpkg-sig adds it); changed after signing = red (BADSIG); signed but not a
+# Debian archive = red; not listed in SHA256SUMS.txt = red. Two VALIDSIG lines with different primaries are red.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 v="$here/verify-mirror.sh"
@@ -61,6 +63,21 @@ mk "$t/unlisted" "$A"; echo three > "$t/unlisted/three.bin"; sign "$A" "$t/unlis
                                  expect "signed file missing from SHA256SUMS.txt = red" 1 "$t/unlisted" "$t/a.asc" "$A"
 mkdir "$t/empty";                expect "empty directory = red" 1 "$t/empty" "$t/a.asc" "$A"
 mk "$t/ok2" "$A";                expect "key file without the expected primary key = red" 1 "$t/ok2" "$t/b.asc" "$A"
+# .deb cases
+mkdeb() {  # dir [extra-member]: a minimal well-formed .deb (ar archive) plus SHA256SUMS.txt, every file signed by the project key
+  rm -rf "$1"; mkdir "$1"; local w="$t/debwork"; rm -rf "$w"; mkdir "$w"
+  (cd "$w" && echo 2.0 > debian-binary && echo ctl > control.tar.gz && echo dat > data.tar.gz && [ -z "${2:-}" ] || echo sig > "$2"
+   ar rc "$1/k_1.0-1_amd64.deb" debian-binary control.tar.gz data.tar.gz ${2:+"$2"})
+  (cd "$1" && sha256sum k_1.0-1_amd64.deb > SHA256SUMS.txt); for f in "$1"/*; do sign "$A" "$f"; done
+}
+mkdeb "$t/deb"; expect ".deb signed, listed, well-formed = green" 0 "$t/deb" "$t/a.asc" "$A"
+mkdeb "$t/debsig" _gpgbuilder; expect ".deb with an extra native-signature member (dpkg-sig) = green" 0 "$t/debsig" "$t/a.asc" "$A"
+mkdeb "$t/debbad"; (cd "$t/debbad" && echo evil > evil.txt && ar r k_1.0-1_amd64.deb evil.txt && rm evil.txt && sha256sum k_1.0-1_amd64.deb > SHA256SUMS.txt && rm SHA256SUMS.txt.asc)
+sign "$A" "$t/debbad/SHA256SUMS.txt"; expect ".deb changed after signing (BADSIG) = red" 1 "$t/debbad" "$t/a.asc" "$A" BADSIG
+mkdeb "$t/debnot"; echo "not an archive" > "$t/debnot/k_1.0-1_amd64.deb"; (cd "$t/debnot" && sha256sum k_1.0-1_amd64.deb > SHA256SUMS.txt); rm "$t/debnot"/*.asc; for f in "$t/debnot"/*; do sign "$A" "$f"; done
+                                 expect "signed file named .deb that is no Debian archive = red" 1 "$t/debnot" "$t/a.asc" "$A" "not a well-formed"
+mkdeb "$t/debunl"; (cd "$t/debunl" && : > SHA256SUMS.txt && rm SHA256SUMS.txt.asc); sign "$A" "$t/debunl/SHA256SUMS.txt"
+                                 expect ".deb missing from SHA256SUMS.txt = red" 1 "$t/debunl" "$t/a.asc" "$A"
 # expiry: signed on 2020-01-01 12:00 while the key was valid; today the key is expired (no sleeping)
 SIGNOPTS=(--faked-system-time 20200101T120000)
 mk "$t/expsub" "${ASUB_EXP}!"; mk "$t/expprim" "$S"; pub s@test.invalid > "$t/s.asc"

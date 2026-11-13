@@ -6,6 +6,9 @@
 # GREEN only if gpg reports GOODSIG and VALIDSIG whose primary-key fingerprint equals the expected one (a signing subkey of that
 # primary key is fine). RED on any other status line: EXPKEYSIG, EXPSIG, REVKEYSIG, BADSIG, ERRSIG, NO_PUBKEY, or
 # no GOODSIG/VALIDSIG at all; EVERY VALIDSIG line of a signature must carry the expected primary fingerprint. No .asc at all, a file without signature, or an empty directory is a failure. Nothing secret is read or printed.
+# A .deb is covered like every other file (detached .asc by the project key + SHA256SUMS.txt) and must in addition be a well-formed Debian
+# archive (ar: debian-binary, control.tar.*, data.tar.*). A native dpkg-sig signature inside the .deb is NOT required here: dpkg-sig is no longer
+# in Ubuntu 24.04 / Debian 12 (the runner image), so fs-release's sign-files action cannot add it; the .asc is the signature that counts.
 set -euo pipefail
 want=""
 if [ "${1:-}" = "--fingerprint" ]; then want=${2:?}; shift 2; fi
@@ -36,6 +39,12 @@ while IFS= read -r -d '' f; do
   if printf '%s\n' "$status" | grep -q -E "^\[GNUPG:\] ($BAD)( |$)"; then
     echo "FAIL $name: $(printf '%s\n' "$status" | grep -o -E "^\[GNUPG:\] ($BAD)" | cut -d' ' -f2 | sort -u | paste -sd, -)"; fail=1; continue
   fi
+  case $name in *.deb)
+    members=$(ar t "$f" 2>/dev/null || true)
+    if ! { [ "$(printf '%s\n' "$members" | head -n1)" = debian-binary ] && printf '%s\n' "$members" | grep -q '^control\.tar' && printf '%s\n' "$members" | grep -q '^data\.tar'; }; then
+      echo "FAIL $name: not a well-formed .deb (ar members debian-binary, control.tar.*, data.tar.* expected)"; fail=1; continue
+    fi ;;
+  esac
   mapfile -t primaries < <(printf '%s\n' "$status" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print toupper($12)}')
   allok=1; [ "${#primaries[@]}" -gt 0 ] || allok=0
   for p in "${primaries[@]}"; do [ "$p" = "$want" ] || allok=0; done

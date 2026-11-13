@@ -31,6 +31,27 @@ where = "GitHub Actions, .github/workflows/mirror.yml (never on a developer mach
 profile = "release_debian"            # KANIDM_BUILD_PROFILE: paths for a Debian 13 package (/etc/kanidmd, /usr/share/kanidmd/static)
 fork = "FreeSynergy/kanidm"           # build-only fork (ADR 0015); no changes; fixes go upstream
 targets = ["x86_64-unknown-linux-gnu"]
+# Everything is built inside ONE container pinned by digest (scripts/build-in-container.sh): AlmaLinux 9 has glibc 2.34, so the binaries run on
+# Debian 12, Ubuntu 22.04, EL9 and anything newer. Tag 9 resolved on 2026-11-14 (the digest is the OCI index; podman manifest inspect confirms it):
+container = "docker.io/library/almalinux@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2"
+# Toolchain pinned exactly. Upstream's rust-toolchain.toml says only `stable` and requires rust-version 1.96; the build overrides it with this version.
+rust_version = "1.100.0"                  # stable of 2026-11-12 (channel-rust-stable.toml, date 2026-11-12)
+rustup_init_sha256 = "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"   # static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256
+# .deb: made with cargo-deb from the finished binary and upstream's own metadata (server/daemon/Cargo.toml [package.metadata.deb]).
+# 2.11.2 is the version upstream's own Debian packaging pins (kanidm_ppa_automation scripts/build_debs.sh, "known good"); newer exists (2.12.1).
+cargo_deb_version = "2.11.2"
+cargo_deb_sha256 = "8537bbc61bd826df86666dd8cdf905159c39087fa55ef889083812ded55ba0c3"   # crates.io checksum of cargo-deb-2.11.2.crate
+deb_revision = 1                          # package revision (ADR 0077): version = <upstream>-<revision>, e.g. 1.12.1-1; raise it when only OUR packaging changes
+
+[platform]
+# Minimum platform of the binary packages (strategy decision: every server installable everywhere): Debian 12, Ubuntu 22.04, EL9.
+min_glibc = "2.34"
+# Smoke test (scripts/smoke-deb.sh): the .deb is installed in each of these (pinned by digest; tags: debian 12, ubuntu 22.04, ubuntu 24.04, resolved 2026-11-14).
+smoke_images = [
+  "docker.io/library/debian@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8",
+  "docker.io/library/ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c",
+  "docker.io/library/ubuntu@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5",
+]
 
 [signing]
 method = "OpenPGP detached (.asc) per file, plus SHA256SUMS.txt; SLSA build provenance by GitHub"
@@ -41,6 +62,12 @@ public_key = "https://github.com/FreeSynergy/fs-release/blob/main/release-signin
 name = "kanidm-1.12.1-linux-x86_64.tar.gz"
 kind = "binary"
 contents = "kanidmd, kanidm, kanidm_unixd (+tasks, kanidm-unix), kanidm_ssh_authorizedkeys, pam_kanidm.so, libnss_kanidm.so, web UI files"
+verification = "built-from-pinned-commit"
+
+[[artifact]]
+name = "kanidmd_1.12.1-1_amd64.deb"
+kind = "deb"
+contents = "server only: kanidmd, systemd unit (upstream's, unchanged), sysusers file (group kanidmd), default /etc/kanidmd/server.toml, web UI files; package name and metadata are upstream's"
 verification = "built-from-pinned-commit"
 
 [[artifact]]
