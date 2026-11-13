@@ -1,6 +1,6 @@
 # Mirror and verification
 
-Kanidm publishes no signed packages (checked 2026-11-11): GitHub releases carry no files, the tag `v1.12.0` and its commit are unsigned, the containers are unsigned, and the Debian PPA is community-made and still at 1.11.2. So FreeSynergy builds from source (ADR 0068, "built only where a format is missing"):
+Kanidm publishes no signed packages (checked 2026-11-11): GitHub releases carry no files, the tag `v1.12.1` and its commit are unsigned, the containers are unsigned, and the Debian PPA is community-made and still at 1.11.2. So FreeSynergy builds from source (ADR 0068, "built only where a format is missing"):
 
 1. `mirror.toml` pins the release tag and the **commit SHA**. The workflow stops unless the upstream tag still points to exactly that commit.
 2. GitHub Actions builds the binaries (profile `release_debian`) and the source tarball of the same version (Kanidm is MPL-2.0: the source travels with the binary), plus an SBOM.
@@ -15,5 +15,7 @@ scripts/verify-mirror.sh <directory-with-the-release-files>
 The script verifies the signatures against the key with the fingerprint in `mirror.toml` (`16A4 A3EE 563A EF51 FCF0 C55D ED7B 57C4 A190 4342`) and the checksums. It prints no secrets because there are none.
 
 Not mirrored: the PPA package 1.11.2 (older, signed by a single person) and the unsigned container images (used for local tests only).
+
+Security: Kanidm 1.12.1 (2026-11-13) fixes one issue rated HIGH by upstream: the SCIM filter parser had an incomplete earlier fix, so crafted queries could exhaust the stack and cause a denial of service by an unauthenticated user (no known exploitation). It affects 1.12.0 even when SCIM is not used; this mirror is raised to 1.12.1 for that reason. Release text: <https://github.com/kanidm/kanidm/releases/tag/v1.12.1>.
 
 Language: [Deutsch](../de/mirror.md)
