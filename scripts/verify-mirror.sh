@@ -40,6 +40,7 @@ while IFS= read -r -d '' f; do
     echo "FAIL $name: $(printf '%s\n' "$status" | grep -o -E "^\[GNUPG:\] ($BAD)" | cut -d' ' -f2 | sort -u | paste -sd, -)"; fail=1; continue
   fi
   case $name in *.deb)
+    command -v ar >/dev/null || { echo "error: ar (package binutils) is needed to check .deb files" >&2; exit 2; }
     members=$(ar t "$f" 2>/dev/null || true)
     if ! { [ "$(printf '%s\n' "$members" | head -n1)" = debian-binary ] && printf '%s\n' "$members" | grep -q '^control\.tar' && printf '%s\n' "$members" | grep -q '^data\.tar'; }; then
       echo "FAIL $name: not a well-formed .deb (ar members debian-binary, control.tar.*, data.tar.* expected)"; fail=1; continue

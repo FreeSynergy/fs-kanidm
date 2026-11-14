@@ -10,13 +10,13 @@ Kanidm publishes no signed packages (checked 2026-11-11): GitHub releases carry 
 
 | File | What it is |
 |---|---|
-| `kanidmd_1.12.1-1_amd64.deb` | **deb**, server only (x86_64): `kanidmd`, upstream's systemd unit (unchanged: `DynamicUser=yes`, group `kanidmd`), the sysusers file that creates the group, the default `/etc/kanidmd/server.toml`, the web UI files. Package name, metadata, unit and maintainer scripts are upstream's own (`server/daemon/Cargo.toml` `[package.metadata.deb]`, `server/daemon/debian/`); `cargo-deb` only packs them. |
+| `kanidmd_1.12.1-1_amd64.deb` | **deb**, server only (x86_64): `kanidmd`, upstream's systemd unit (unchanged: `DynamicUser=yes`, group `kanidmd`), the sysusers file that creates the group, the default `/etc/kanidmd/server.toml`, the web UI files. `kanidmd` is in `/usr/bin` here (the tarball has it in `/usr/sbin`). Package name, metadata, unit and maintainer scripts are upstream's own (`server/daemon/Cargo.toml` `[package.metadata.deb]`, `server/daemon/debian/`); `cargo-deb` only packs them. One change of ours (package revision `-1`): `Depends` gets `systemd` added, see below. The binary is not stripped, so it is byte-identical to the one in the tarball. |
 | `kanidm-1.12.1-linux-x86_64.tar.gz` | all binaries (server, client, unix daemons, PAM/NSS modules) as a tar |
 | `kanidm-1.12.1-source.tar.gz` | source of the same version (MPL-2.0) |
 
 **Package version** (ADR 0077): `<upstream version>-<revision>`, here `1.12.1-1`. The revision rises (`-2`, ...) only when our packaging changes and upstream's version does not.
 
-**Minimum platform:** everything is built in one container pinned by digest (AlmaLinux 9, glibc 2.34), so the binaries and the `.deb` run on Debian 12, Ubuntu 22.04, Enterprise Linux 9 and anything newer. After every build the `smoke` job installs the `.deb` in Debian 12, Ubuntu 22.04 and Ubuntu 24.04 containers (images pinned by digest in `mirror.toml`), checks the contents, the group `kanidmd`, the unit file and runs `kanidmd --version` (`scripts/smoke-deb.sh`; systemd itself is not started there).
+**Minimum platform:** everything is built in one container pinned by digest (AlmaLinux 9, glibc 2.34), so the binaries and the `.deb` run on Debian 12, Ubuntu 22.04, Enterprise Linux 9 and anything newer. After every build the `smoke` job installs the `.deb` in Debian 12, Ubuntu 22.04 and Ubuntu 24.04 containers (images pinned by digest in `mirror.toml`), checks the contents, the group `kanidmd`, the unit file and runs `kanidmd version` (`scripts/smoke-deb.sh`; systemd itself is not started there).
 
 **Install (Debian, Ubuntu):**
 
@@ -25,9 +25,9 @@ scripts/verify-mirror.sh <directory-with-the-release-files>      # first: signat
 sudo apt install ./kanidmd_1.12.1-1_amd64.deb
 ```
 
-`apt` does **not** check our signature: it only checks signed apt repositories, and this is a single file. The signature that counts is the detached OpenPGP signature `kanidmd_1.12.1-1_amd64.deb.asc` (check with `verify-mirror.sh` or `gpg --verify`); a signed apt repository is planned. A signature inside the `.deb` itself (`dpkg-sig`) is not relied on: `dpkg-sig` is no longer in Ubuntu 24.04 or Debian 12, so the signing action cannot add it.
+`apt` does **not** check our signature: it only checks signed apt repositories, and this is a single file. The signature that counts is the detached OpenPGP signature `kanidmd_1.12.1-1_amd64.deb.asc` (check with `verify-mirror.sh` or `gpg --verify`); the signed apt repository (ADR 0078) is the way to get checking through `apt`. A native signature inside the `.deb` (`dpkg-sig`) does not exist: the tool is gone from Ubuntu 24.04 and Debian 12, so the signing action cannot add it. `verify-mirror.sh` needs `ar` (package `binutils`) to check `.deb` files.
 
-Upstream's own postinst calls `systemd-sysusers`, but the package does not depend on `systemd`; every server this package is for runs systemd. The package is installed but not enabled: edit `/etc/kanidmd/server.toml` (domain, origin, certificates) first, then `systemctl enable --now kanidmd`.
+Upstream's own postinst calls `systemd-sysusers` (it creates the group `kanidmd` from the sysusers file) but upstream's package does not depend on `systemd`; our revision adds `systemd` to `Depends` (the only change to upstream's metadata, made on our checkout during the build, shown in the build log). `libssl` is deliberately not a dependency: Kanidm 1.12 uses rustls and bundled libraries, and the smoke test checks the shared libraries of the binary in a bare image. The package is installed but not enabled: edit `/etc/kanidmd/server.toml` (domain, origin, certificates) first, then `systemctl enable --now kanidmd`.
 
 Check a release yourself:
 

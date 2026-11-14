@@ -38,7 +38,7 @@ jobs:
           print("repository=" + m["source"]["repository"]); print("tag=" + m["source"]["tag"])
           print("commit=" + m["source"]["commit"]); print("version=" + m["upstream"]["version"])
           print("profile=" + m["build"]["profile"]); print("container=" + m["build"]["container"])
-          print("rust_version=" + m["build"]["rust_version"]); print("rustup_init_sha256=" + m["build"]["rustup_init_sha256"])
+          print("rust_version=" + m["build"]["rust_version"]); print("rustup_version=" + m["build"]["rustup_version"]); print("rustup_init_sha256=" + m["build"]["rustup_init_sha256"])
           print("cargo_deb_version=" + m["build"]["cargo_deb_version"]); print("cargo_deb_sha256=" + m["build"]["cargo_deb_sha256"])
           print("deb_version=" + m["upstream"]["version"] + "-" + str(m["build"]["deb_revision"]))
           PY
@@ -78,6 +78,7 @@ jobs:
           PROFILE: ${{ steps.pin.outputs.profile }}
           COMMIT: ${{ steps.pin.outputs.commit }}
           RUST_VERSION: ${{ steps.pin.outputs.rust_version }}
+          RUSTUP_VERSION: ${{ steps.pin.outputs.rustup_version }}
           RUSTUP_INIT_SHA256: ${{ steps.pin.outputs.rustup_init_sha256 }}
           CARGO_DEB_VERSION: ${{ steps.pin.outputs.cargo_deb_version }}
           CARGO_DEB_SHA256: ${{ steps.pin.outputs.cargo_deb_sha256 }}
@@ -86,7 +87,7 @@ jobs:
           set -euo pipefail
           case "$IMAGE" in *@sha256:*) ;; *) echo "::error::build image is not pinned by digest"; exit 1 ;; esac
           docker run --rm -v "$PWD/src:/work/src" -v "$PWD/dist:/work/dist" -v "$PWD/scripts/build-in-container.sh:/build.sh:ro" \
-            -e VERSION="$V" -e KANIDM_BUILD_PROFILE="$PROFILE" -e COMMIT="$COMMIT" -e RUST_VERSION -e RUSTUP_INIT_SHA256 \
+            -e VERSION="$V" -e KANIDM_BUILD_PROFILE="$PROFILE" -e COMMIT="$COMMIT" -e RUST_VERSION -e RUSTUP_VERSION -e RUSTUP_INIT_SHA256 \
             -e CARGO_DEB_VERSION -e CARGO_DEB_SHA256 -e DEB_VERSION \
             -e SOURCE_DATE_EPOCH="$(git -C src log -1 --format=%ct)" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             "$IMAGE" bash /build.sh

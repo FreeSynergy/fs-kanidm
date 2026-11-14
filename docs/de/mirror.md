@@ -10,13 +10,13 @@ Kanidm bietet keine signierten Pakete an (geprüft am 11.11.2026): GitHub-Releas
 
 | Datei | Was es ist |
 |---|---|
-| `kanidmd_1.12.1-1_amd64.deb` | **deb**, nur Server (x86_64): `kanidmd`, die systemd-Unit von Upstream (unverändert: `DynamicUser=yes`, Gruppe `kanidmd`), die sysusers-Datei, die die Gruppe anlegt, die Standard-`/etc/kanidmd/server.toml`, die Dateien der Web-Oberfläche. Paketname, Metadaten, Unit und Maintainer-Skripte stammen von Upstream (`server/daemon/Cargo.toml` `[package.metadata.deb]`, `server/daemon/debian/`); `cargo-deb` packt sie nur ein. |
+| `kanidmd_1.12.1-1_amd64.deb` | **deb**, nur Server (x86_64): `kanidmd`, die systemd-Unit von Upstream (unverändert: `DynamicUser=yes`, Gruppe `kanidmd`), die sysusers-Datei, die die Gruppe anlegt, die Standard-`/etc/kanidmd/server.toml`, die Dateien der Web-Oberfläche. `kanidmd` liegt hier in `/usr/bin` (im Tarball in `/usr/sbin`). Paketname, Metadaten, Unit und Maintainer-Skripte stammen von Upstream (`server/daemon/Cargo.toml` `[package.metadata.deb]`, `server/daemon/debian/`); `cargo-deb` packt sie nur ein. Eine Änderung von uns (Paket-Revision `-1`): `Depends` bekommt `systemd`, siehe unten. Das Programm wird nicht gestrippt und ist daher byte-gleich mit dem im Tarball. |
 | `kanidm-1.12.1-linux-x86_64.tar.gz` | alle Programme (Server, Client, Unix-Dienste, PAM/NSS-Module) als Tar |
 | `kanidm-1.12.1-source.tar.gz` | Quellcode derselben Version (MPL-2.0) |
 
 **Paketversion** (ADR 0077): `<Upstream-Version>-<Revision>`, hier `1.12.1-1`. Die Revision steigt (`-2`, ...) nur, wenn sich unser Paketbau ändert, die Upstream-Version aber nicht.
 
-**Mindestplattform:** Alles wird in einem per Digest festgelegten Container gebaut (AlmaLinux 9, glibc 2.34); die Programme und das `.deb` laufen daher auf Debian 12, Ubuntu 22.04, Enterprise Linux 9 und neueren Systemen. Nach jedem Bau installiert der Job `smoke` das `.deb` in Containern mit Debian 12, Ubuntu 22.04 und Ubuntu 24.04 (Images in `mirror.toml` per Digest festgelegt), prüft Inhalt, Gruppe `kanidmd` und Unit-Datei und startet `kanidmd --version` (`scripts/smoke-deb.sh`; systemd selbst läuft dort nicht).
+**Mindestplattform:** Alles wird in einem per Digest festgelegten Container gebaut (AlmaLinux 9, glibc 2.34); die Programme und das `.deb` laufen daher auf Debian 12, Ubuntu 22.04, Enterprise Linux 9 und neueren Systemen. Nach jedem Bau installiert der Job `smoke` das `.deb` in Containern mit Debian 12, Ubuntu 22.04 und Ubuntu 24.04 (Images in `mirror.toml` per Digest festgelegt), prüft Inhalt, Gruppe `kanidmd` und Unit-Datei und startet `kanidmd version` (`scripts/smoke-deb.sh`; systemd selbst läuft dort nicht).
 
 **Installation (Debian, Ubuntu):**
 
@@ -25,9 +25,9 @@ scripts/verify-mirror.sh <Verzeichnis-mit-den-Release-Dateien>      # zuerst: Si
 sudo apt install ./kanidmd_1.12.1-1_amd64.deb
 ```
 
-`apt` prüft unsere Signatur **nicht**: Es prüft nur signierte apt-Paketquellen, dies ist eine einzelne Datei. Maßgeblich ist die abgetrennte OpenPGP-Signatur `kanidmd_1.12.1-1_amd64.deb.asc` (mit `verify-mirror.sh` oder `gpg --verify` prüfen); eine signierte apt-Paketquelle ist geplant. Auf eine Signatur im `.deb` selbst (`dpkg-sig`) stützen wir uns nicht: `dpkg-sig` gibt es in Ubuntu 24.04 und Debian 12 nicht mehr, die Signier-Aktion kann sie daher nicht anbringen.
+`apt` prüft unsere Signatur **nicht**: Es prüft nur signierte apt-Paketquellen, dies ist eine einzelne Datei. Maßgeblich ist die abgetrennte OpenPGP-Signatur `kanidmd_1.12.1-1_amd64.deb.asc` (mit `verify-mirror.sh` oder `gpg --verify` prüfen); die signierte apt-Paketquelle (ADR 0078) ist der Weg, die Prüfung über `apt` zu bekommen. Eine native Signatur im `.deb` (`dpkg-sig`) gibt es nicht: das Werkzeug fehlt in Ubuntu 24.04 und Debian 12, die Signier-Aktion kann sie daher nicht anbringen. `verify-mirror.sh` braucht `ar` (Paket `binutils`), um `.deb`-Dateien zu prüfen.
 
-Das postinst von Upstream ruft `systemd-sysusers` auf, das Paket hängt aber nicht von `systemd` ab; jeder Server, für den das Paket gedacht ist, läuft mit systemd. Das Paket wird ohne Autostart installiert: erst `/etc/kanidmd/server.toml` anpassen (Domain, Origin, Zertifikate), dann `systemctl enable --now kanidmd`.
+Das postinst von Upstream ruft `systemd-sysusers` auf (es legt die Gruppe `kanidmd` aus der sysusers-Datei an), das Upstream-Paket hängt aber nicht von `systemd` ab; unsere Revision ergänzt `systemd` in `Depends` (die einzige Änderung an Upstreams Metadaten, beim Bau an unserem Checkout, im Build-Log als Diff sichtbar). `libssl` ist absichtlich keine Abhängigkeit: Kanidm 1.12 nutzt rustls und eingebaute Bibliotheken, und der Smoke-Test prüft die Bibliotheken des Programms in einem leeren Image. Das Paket wird installiert, aber nicht aktiviert: erst `/etc/kanidmd/server.toml` anpassen (Domain, Origin, Zertifikate), dann `systemctl enable --now kanidmd`.
 
 Selbst prüfen:
 

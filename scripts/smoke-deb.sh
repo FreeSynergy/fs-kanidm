@@ -4,9 +4,10 @@
 # Inside the container (INSIDE=1) it does what a person does: installs the package the way apt does, then checks it:
 #   dpkg-deb -I / -c (metadata, file list), the version from mirror.toml, systemd unit and sysusers file present and unchanged in the
 #   points that matter (DynamicUser + group kanidmd), group kanidmd created by the package's own postinst via systemd-sysusers,
-#   `kanidmd --version` as a plain user, no missing shared library, removal leaves no binary. systemd itself is NOT started.
-# The container has no systemd, but upstream's postinst calls `systemd-sysusers` and the upstream package does not depend on `systemd`;
-# every server this package is meant for runs systemd, so the package `systemd` is installed first (installed, never started).
+#   `kanidmd version` (the subcommand; kanidmd has no --version flag) as a plain user, no missing shared library (checked on the unpacked binary
+#   BEFORE anything else is installed, so a missing library is not hidden by a package apt pulled in), removal leaves no binary.
+#   systemd itself is NOT started. Our package revision adds `systemd` to Depends (upstream's postinst calls `systemd-sysusers`): the
+#   container starts without systemd, so apt installing it through that dependency is part of what is tested.
 set -euo pipefail
 die() { echo "::error::$*" >&2; exit 1; }
 
@@ -46,8 +47,13 @@ for p in ./usr/bin/kanidmd ./usr/lib/sysusers.d/kanidmd.conf ./etc/kanidmd/serve
 done
 grep -q -E ' \./(usr/)?lib/systemd/system/kanidmd\.service$' <<<"$list" || die "kanidmd.service is not in the package"
 
+# shared libraries of the binary as shipped, in the bare image (before apt installs anything)
+tmp=$(mktemp -d); dpkg-deb -x "$deb" "$tmp"
+ldd "$tmp/usr/bin/kanidmd"
+if ldd "$tmp/usr/bin/kanidmd" | grep 'not found'; then die "kanidmd needs shared libraries this platform lacks (see above); add them to Depends"; fi
+rm -rf "$tmp"
+dpkg-deb -f "$deb" Depends | grep -q -w systemd || die "Depends of the package does not name systemd"
 apt-get update -qq >/dev/null
-apt-get install -y -qq --no-install-recommends systemd >/dev/null      # reason: see the head of this file
 apt-get install -y --no-install-recommends "$deb" >/dev/null           # apt resolves the dependencies (libc6, tpm-udev), like a person would
 
 getent group kanidmd >/dev/null || die "group kanidmd does not exist: the sysusers file was not applied by the postinst"
@@ -56,12 +62,11 @@ unit=$(dpkg -L kanidmd | grep -E '/systemd/system/kanidmd\.service$' | head -n1)
 grep -q '^DynamicUser=yes' "$unit" || die "unit file lost DynamicUser=yes"
 grep -q '^Group=kanidmd' "$unit" || die "unit file lost Group=kanidmd"
 grep -q '^g kanidmd' /usr/lib/sysusers.d/kanidmd.conf || die "sysusers file does not declare group kanidmd"
-if ldd /usr/bin/kanidmd | grep 'not found'; then die "kanidmd has unresolved shared libraries (see above)"; fi
 
 useradd --create-home smoke
-out=$(runuser -u smoke -- timeout 30 /usr/bin/kanidmd --version </dev/null 2>&1) || die "kanidmd --version failed: $out"
+out=$(runuser -u smoke -- timeout 30 /usr/bin/kanidmd version </dev/null 2>&1) || die "kanidmd version failed: $out"
 echo "started: $out"
-grep -q -F "${WANT_VERSION%-*}" <<<"$out" || die "kanidmd --version does not say ${WANT_VERSION%-*}: $out"
+grep -q -F "${WANT_VERSION%-*}" <<<"$out" || die "kanidmd version does not say ${WANT_VERSION%-*}: $out"
 
 apt-get remove -y kanidmd >/dev/null
 ! command -v kanidmd >/dev/null || die "kanidmd is still there after removal"

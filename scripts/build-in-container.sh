@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Runs INSIDE the digest-pinned AlmaLinux 9 container (glibc 2.34: the binaries then run on Debian 12, Ubuntu 22.04, EL9 and newer).
 # Called by .github/workflows/mirror.yml (job build); never run it on a developer machine. No secrets exist in this job.
-# Input (env, all from mirror.toml): RUST_VERSION RUSTUP_INIT_SHA256 CARGO_DEB_VERSION CARGO_DEB_SHA256 DEB_VERSION VERSION
+# Input (env, all from mirror.toml): RUST_VERSION RUSTUP_VERSION RUSTUP_INIT_SHA256 CARGO_DEB_VERSION CARGO_DEB_SHA256 DEB_VERSION VERSION
 #   KANIDM_BUILD_PROFILE SOURCE_DATE_EPOCH COMMIT HOST_UID HOST_GID
 # Mounts: /work/src (the pinned upstream checkout), /work/dist (output: tarball + .deb).
 set -euo pipefail
-: "${RUST_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${CARGO_DEB_VERSION:?}" "${CARGO_DEB_SHA256:?}" "${DEB_VERSION:?}" "${VERSION:?}"
+: "${RUST_VERSION:?}" "${RUSTUP_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${CARGO_DEB_VERSION:?}" "${CARGO_DEB_SHA256:?}" "${DEB_VERSION:?}" "${VERSION:?}"
 : "${KANIDM_BUILD_PROFILE:?}" "${SOURCE_DATE_EPOCH:?}" "${COMMIT:?}" "${HOST_UID:?}" "${HOST_GID:?}"
 # Files written below belong to the runner user again (the container runs as root).
 trap 'chown -R "$HOST_UID:$HOST_GID" /work/src /work/dist' EXIT
@@ -18,9 +18,9 @@ dnf -y -q install gcc gcc-c++ make cmake clang lld pkgconf-pkg-config openssl-de
 clang --version | head -n1; ld.lld --version
 ldd --version | head -n1   # glibc must be 2.34 here
 
-# 2. Rust toolchain: the exact version, rustup-init checked against a pinned sha256.
+# 2. Rust toolchain: the exact version; rustup-init of a fixed rustup version (archive URL), checked against a pinned sha256.
 export CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup PATH=/opt/cargo/bin:$PATH
-curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/rustup-init https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/x86_64-unknown-linux-gnu/rustup-init"
 echo "$RUSTUP_INIT_SHA256  /tmp/rustup-init" | sha256sum --check --strict -
 chmod +x /tmp/rustup-init
 /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION"
@@ -57,14 +57,24 @@ cp -r /work/src/server/core/static "$s/usr/share/kanidmd/static"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$SOURCE_DATE_EPOCH" -C "$s" -czf "/work/dist/kanidm-$VERSION-linux-x86_64.tar.gz" .
 
 # 6. .deb of the server from the finished binary and UPSTREAM's metadata (server/daemon/Cargo.toml [package.metadata.deb],
-#    server/daemon/debian/{kanidmd.service,group.conf,server.toml,postinst}); nothing of it is changed. Same call as upstream's
-#    kanidm_ppa_automation/scripts/build_debs.sh (`cargo deb -p daemon --no-build --deb-version`). --no-build: the binary above is packed as it is.
+#    server/daemon/debian/{kanidmd.service,group.conf,server.toml,postinst}); except Depends (see below). Same call as upstream's
+#    kanidm_ppa_automation/scripts/build_debs.sh (`cargo deb -p daemon --no-build --deb-version`; plus --no-strip below). --no-build: the binary
+#    above is packed as it is.
 #    The metadata names a changelog that upstream's script generates; we write the same kind of file (reproducible date).
+# Our package revision (-1): Depends gets `systemd` added, because upstream's postinst runs `systemd-sysusers` (the sysusers file creates the
+# group) and upstream does not declare it. libssl is NOT added: Cargo.lock has no openssl/native-tls crate (rustls + bundled aws-lc, rusqlite
+# bundled), so the binary links no libssl; the smoke test runs ldd on the unpacked binary in a bare image to prove it. Done on our checkout of
+# the pinned commit, asserted, and shown as a diff in the log; cargo-deb has no option to override Depends.
+meta=server/daemon/Cargo.toml
+[ "$(grep -c -E '^[[:space:]]*"libc6",$' "$meta")" = 1 ] || { echo "::error::$meta [package.metadata.deb] depends changed upstream; review"; exit 1; }
+sed -i -E 's/^([[:space:]]*)"libc6",$/\1"libc6",\n\1"systemd",/' "$meta"
+git diff -- "$meta"
 mkdir -p target/debian
 {
   echo "kanidmd ($DEB_VERSION) UNRELEASED; urgency=medium"; echo
   echo "  * Built by FreeSynergy from upstream Kanidm $VERSION, commit ${COMMIT:0:7}"; echo
   echo " -- FreeSynergy mirror build  $(date -u -R -d "@$SOURCE_DATE_EPOCH")"
 } > target/debian/changelog
-cargo deb -p daemon --no-build --deb-version "$DEB_VERSION" --output /work/dist/
+# --no-strip: the binary in the .deb stays byte-identical to the one in the tarball (upstream sets strip = "none" in its release profile)
+cargo deb -p daemon --no-build --no-strip --deb-version "$DEB_VERSION" --output /work/dist/
 ls -l /work/dist

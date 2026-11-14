@@ -36,7 +36,8 @@ targets = ["x86_64-unknown-linux-gnu"]
 container = "docker.io/library/almalinux@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2"
 # Toolchain pinned exactly. Upstream's rust-toolchain.toml says only `stable` and requires rust-version 1.96; the build overrides it with this version.
 rust_version = "1.100.0"                  # stable of 2026-11-12 (channel-rust-stable.toml, date 2026-11-12)
-rustup_init_sha256 = "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"   # static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256
+rustup_version = "1.29.3"                 # release-stable.toml of 2026-11-14; fetched from the versioned archive URL, so the hash below stays valid
+rustup_init_sha256 = "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"   # static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init.sha256
 # .deb: made with cargo-deb from the finished binary and upstream's own metadata (server/daemon/Cargo.toml [package.metadata.deb]).
 # 2.11.2 is the version upstream's own Debian packaging pins (kanidm_ppa_automation scripts/build_debs.sh, "known good"); newer exists (2.12.1).
 cargo_deb_version = "2.11.2"
@@ -67,7 +68,7 @@ verification = "built-from-pinned-commit"
 [[artifact]]
 name = "kanidmd_1.12.1-1_amd64.deb"
 kind = "deb"
-contents = "server only: kanidmd, systemd unit (upstream's, unchanged), sysusers file (group kanidmd), default /etc/kanidmd/server.toml, web UI files; package name and metadata are upstream's"
+contents = "server only (kanidmd in /usr/bin; the tarball has it in /usr/sbin): kanidmd, systemd unit (upstream's, unchanged), sysusers file (group kanidmd), default /etc/kanidmd/server.toml, web UI files; package name and metadata are upstream's"
 verification = "built-from-pinned-commit"
 
 [[artifact]]
