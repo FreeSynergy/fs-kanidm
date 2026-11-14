@@ -14,3 +14,10 @@ condition = "AND"
 targetRules = ["generic-api-key"]
 paths = ['''^mirror\.toml$''']
 regexes = ['''16A4A3EE563AEF51FCF0C55DED7B57C4A1904342''']
+
+[[allowlists]]
+description = "Artificial example JWT of the scanner selftest (EX[jwt] in scripts/test/scan_secrets.sh); not a real token"
+condition = "AND"
+targetRules = ["jwt"]
+paths = ['''^scripts/test/scan_secrets\.sh$''']
+regexes = ['''eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4eHh4eHh4eCJ9\.c2lnbmF0dXJl''']
