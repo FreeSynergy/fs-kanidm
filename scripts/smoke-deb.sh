@@ -41,11 +41,11 @@ dpkg-deb -c "$deb"
 [ "$(dpkg-deb -f "$deb" Package)" = kanidmd ] || die "package name is not kanidmd"
 [ "$(dpkg-deb -f "$deb" Architecture)" = amd64 ] || die "architecture is not amd64"
 [ "$(dpkg-deb -f "$deb" Version)" = "$WANT_VERSION" ] || die "version is $(dpkg-deb -f "$deb" Version), mirror.toml says $WANT_VERSION"
-list=$(dpkg-deb -c "$deb")
-for p in ./usr/bin/kanidmd ./usr/lib/sysusers.d/kanidmd.conf ./etc/kanidmd/server.toml ./usr/share/kanidmd/static/; do
-  grep -q -F " $p" <<<"$list" || die "$p is not in the package"
+list=$(dpkg-deb -c "$deb" | awk '{print $NF}' | sed 's|^\./||')   # names without a leading ./ (cargo-deb writes none, dpkg-deb --build writes one)
+for p in usr/bin/kanidmd usr/lib/sysusers.d/kanidmd.conf etc/kanidmd/server.toml usr/share/kanidmd/static/; do
+  grep -q -x -F "$p" <<<"$list" || die "$p is not in the package"
 done
-grep -q -E ' \./(usr/)?lib/systemd/system/kanidmd\.service$' <<<"$list" || die "kanidmd.service is not in the package"
+grep -q -E '^(usr/)?lib/systemd/system/kanidmd\.service$' <<<"$list" || die "kanidmd.service is not in the package"
 
 # shared libraries of the binary as shipped, in the bare image (before apt installs anything)
 tmp=$(mktemp -d); dpkg-deb -x "$deb" "$tmp"
